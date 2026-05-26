@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flow2API Token Updater</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            width: 400px;
+            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-size: 14px;
+            color: #333;
+        }
+        h1 {
+            font-size: 18px;
+            margin-bottom: 16px;
+            color: #1a73e8;
+        }
+        .form-group {
+            margin-bottom: 16px;
+        }
+        label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: 500;
+            color: #555;
+        }
+        input[type="text"],
+        input[type="number"] {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        input[type="text"]:focus,
+        input[type="number"]:focus {
+            outline: none;
+            border-color: #1a73e8;
+        }
+        .hint {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+        .button-group {
+            display: flex;
+            gap: 8px;
+            margin-top: 20px;
+        }
+        button {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .btn-primary {
+            background-color: #1a73e8;
+            color: white;
+        }
+        .btn-primary:hover {
+            background-color: #1557b0;
+        }
+        .btn-secondary {
+            background-color: #f1f3f4;
+            color: #333;
+        }
+        .btn-secondary:hover {
+            background-color: #e8eaed;
+        }
+        .status {
+            margin-top: 16px;
+            padding: 12px;
+            border-radius: 4px;
+            font-size: 13px;
+            display: none;
+        }
+        .status.success {
+            background-color: #e6f4ea;
+            color: #137333;
+            border: 1px solid #c6e1c6;
+        }
+        .status.error {
+            background-color: #fce8e6;
+            color: #c5221f;
+            border: 1px solid #f5c2c1;
+        }
+        .status.info {
+            background-color: #e8f0fe;
+            color: #1967d2;
+            border: 1px solid #d2e3fc;
+        }
+        .divider {
+            height: 1px;
+            background-color: #e0e0e0;
+            margin: 20px 0;
+        }
+        .info-section {
+            background-color: #f8f9fa;
+            padding: 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #666;
+        }
+        .info-section strong {
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔄 Flow2API Token Updater</h1>
+
+    <div class="form-group">
+        <label for="apiUrl">API URL</label>
+        <input type="text" id="apiUrl" placeholder="http://127.0.0.1:8000/api/plugin/update-token">
+        <div class="hint">Copy from "Plugin Connection Config" in the Flow2API admin panel</div>
+    </div>
+
+    <div class="form-group">
+        <label for="connectionToken">Connection Token</label>
+        <input type="text" id="connectionToken" placeholder="Enter connection token">
+        <div class="hint">Copy from "Plugin Connection Config" in the Flow2API admin panel</div>
+    </div>
+
+    <div class="form-group">
+        <label for="refreshInterval">Refresh Interval (minutes)</label>
+        <input type="number" id="refreshInterval" value="60" min="1" max="1440">
+        <div class="hint">Recommended: 60 minutes (1 hour)</div>
+    </div>
+
+    <div class="button-group">
+        <button class="btn-primary" id="saveBtn">Save Config</button>
+        <button class="btn-secondary" id="testBtn">Test Now</button>
+    </div>
+
+    <div class="button-group">
+        <button class="btn-secondary" id="logsBtn" style="width: 100%;">📋 View Logs</button>
+    </div>
+
+    <div class="status" id="status"></div>
+
+    <div class="divider"></div>
+
+    <div class="info-section">
+        <strong>📌 How to use:</strong><br>
+        1. Get the API URL and Token from the Flow2API admin panel<br>
+        2. Fill in the config and save<br>
+        3. The extension will automatically extract Google Labs cookies on a schedule<br>
+        4. Extracted cookies are synced to the Flow2API system automatically
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>

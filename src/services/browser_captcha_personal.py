@@ -7239,7 +7239,7 @@ class BrowserCaptchaService:
                 self._resident_pick_index = (self._resident_pick_index + 1) % max(len(candidates), 1)
                 return token_candidates[pick_index]
 
-        # 共享打码池不再按 project_id 绑定；这里只根据“是否就绪 / 是否空闲 / 使用历史”
+        # 共享打码池不再按 project_id 绑定；这里只根据"是否就绪 / 是否空闲 / 使用历史"
         # 做全局选择，避免 4 token/4 project 时把请求硬绑定到固定 tab。
         ready_idle = [
             (slot_id, resident_info)

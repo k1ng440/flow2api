@@ -29,7 +29,7 @@ class TokenManager:
         guard: asyncio.Lock,
         token_id: int,
     ) -> asyncio.Lock:
-        """按 token 维度获取锁，避免不同 token 之间串行阻塞。"""
+        """Acquire a per-token lock to avoid serializing across different tokens."""
         async with guard:
             lock = lock_map.get(token_id)
             if lock is None:
@@ -38,7 +38,7 @@ class TokenManager:
             return lock
 
     def _get_project_pool_size(self) -> int:
-        """读取当前生效的单 Token 项目池大小配置。"""
+        """Read the currently effective per-token project pool size setting."""
         try:
             return max(1, min(50, int(config.personal_project_pool_size or 4)))
         except Exception:
@@ -68,7 +68,7 @@ class TokenManager:
         tokens: Optional[List[Token]] = None,
         limit: Optional[int] = None,
     ) -> List[str]:
-        """返回 personal 模式启动时建议预热的项目 ID 列表。"""
+        """Return the list of project IDs recommended for warmup when personal mode starts."""
         token_list = tokens if tokens is not None else await self.get_all_tokens()
         pool_size = self._get_project_pool_size()
         warmup_ids: List[str] = []
@@ -184,7 +184,7 @@ class TokenManager:
                 for project_id in project_ids:
                     await service.stop_resident_mode(project_id)
             except Exception as e:
-                debug_logger.log_warning(f"[DELETE_TOKEN] 清理 personal 浏览器状态失败: {e}")
+                debug_logger.log_warning(f"[DELETE_TOKEN] Failed to clean up personal browser state: {e}")
 
     async def enable_token(self, token_id: int):
         """Enable a token and reset error count"""
@@ -197,7 +197,7 @@ class TokenManager:
         """Disable a token"""
         await self.db.update_token(token_id, is_active=False)
 
-    # ========== Token添加 (支持Project创建) ==========
+    # ========== Token Add (with Project creation) ==========
 
     async def add_token(
         self,
@@ -215,7 +215,7 @@ class TokenManager:
         """Add a new token and prepare its pooled projects."""
         existing_token = await self.db.get_token_by_st(st)
         if existing_token:
-            raise ValueError(f"Token ??????: {existing_token.email}?")
+            raise ValueError(f"Token already exists: {existing_token.email}")
 
         debug_logger.log_info(f"[ADD_TOKEN] Converting ST to AT...")
         try:
@@ -232,7 +232,7 @@ class TokenManager:
                 except Exception:
                     pass
         except Exception as e:
-            raise ValueError(f"ST?AT??: {str(e)}")
+            raise ValueError(f"ST to AT conversion failed: {str(e)}")
 
         try:
             credits_result = await self.flow_client.get_credits(at)
@@ -267,7 +267,7 @@ class TokenManager:
                     tool_name="PINHOLE"
                 ))
             except Exception as e:
-                raise ValueError(f"??????: {str(e)}")
+                raise ValueError(f"Failed to get credits: {str(e)}")
 
         token = Token(
             st=st,
@@ -319,9 +319,9 @@ class TokenManager:
         captcha_proxy_url: Optional[str] = None,
         extension_route_key: Optional[str] = None,
     ):
-        """Update token (支持修改project_id和project_name)
+        """Update token (supports modifying project_id and project_name)
 
-        当用户编辑保存token时，如果token未过期，自动清空429禁用状态
+        Called when the user edits and saves a token; clears 429 ban state automatically if the token is not expired.
         """
         update_fields = {}
 
@@ -350,10 +350,10 @@ class TokenManager:
         if extension_route_key is not None:
             update_fields["extension_route_key"] = extension_route_key
 
-        # 检查token是否因429被禁用，如果是且未过期，则清空429状态
+        # Check if token is banned due to 429; if so and not expired, clear the 429 ban state
         token = await self.db.get_token(token_id)
         if token and token.ban_reason == "429_rate_limit":
-            # 检查token是否过期
+            # Check whether the token has expired
             is_expired = False
             if token.at_expires:
                 now = datetime.now(timezone.utc)
@@ -363,25 +363,24 @@ class TokenManager:
                     at_expires_aware = token.at_expires
                 is_expired = at_expires_aware <= now
 
-            # 如果未过期，清空429禁用状态
             if not is_expired:
-                debug_logger.log_info(f"[UPDATE_TOKEN] Token {token_id} 编辑保存，清空429禁用状态")
+                debug_logger.log_info(f"[UPDATE_TOKEN] Token {token_id} saved via edit, clearing 429 ban state")
                 update_fields["ban_reason"] = None
                 update_fields["banned_at"] = None
 
         if update_fields:
             await self.db.update_token(token_id, **update_fields)
 
-    # ========== AT自动刷新逻辑 (核心) ==========
+    # ========== AT Auto-Refresh Logic (core) ==========
 
     def _should_refresh_at(self, token: Token) -> bool:
-        """根据当前 token 快照判断是否需要刷新 AT。"""
+        """Determine whether an AT refresh is needed based on the current token snapshot."""
         if not token.at:
-            debug_logger.log_info(f"[AT_CHECK] Token {token.id}: AT不存在,需要刷新")
+            debug_logger.log_info(f"[AT_CHECK] Token {token.id}: AT missing, refresh needed")
             return True
 
         if not token.at_expires:
-            debug_logger.log_info(f"[AT_CHECK] Token {token.id}: AT过期时间未知,尝试刷新")
+            debug_logger.log_info(f"[AT_CHECK] Token {token.id}: AT expiry unknown, attempting refresh")
             return True
 
         now = datetime.now(timezone.utc)
@@ -393,21 +392,21 @@ class TokenManager:
         time_until_expiry = at_expires_aware - now
         if time_until_expiry.total_seconds() < 3600:
             debug_logger.log_info(
-                f"[AT_CHECK] Token {token.id}: AT即将过期 "
-                f"(剩余 {time_until_expiry.total_seconds():.0f} 秒),需要刷新"
+                f"[AT_CHECK] Token {token.id}: AT expiring soon "
+                f"({time_until_expiry.total_seconds():.0f}s remaining), refresh needed"
             )
             return True
 
         return False
 
     def needs_at_refresh(self, token: Optional[Token]) -> bool:
-        """供调度层快速判断当前 token 是否大概率会触发 AT 刷新。"""
+        """Quick check for the scheduling layer: whether this token will likely trigger an AT refresh."""
         if not token:
             return True
         return self._should_refresh_at(token)
 
     async def ensure_valid_token(self, token: Optional[Token]) -> Optional[Token]:
-        """确保 token 的 AT 可用，并在必要时返回刷新后的最新对象。"""
+        """Ensure the token's AT is usable, refreshing and returning the latest object if needed."""
         if not token:
             return None
 
@@ -420,7 +419,7 @@ class TokenManager:
         return await self.db.get_token(token.id)
 
     async def is_at_valid(self, token_id: int, token: Optional[Token] = None) -> bool:
-        """检查AT是否有效,如果无效或即将过期则自动刷新
+        """Check whether the AT is valid; automatically refresh if invalid or about to expire.
 
         Returns:
             True if AT is valid or refreshed successfully
@@ -481,7 +480,7 @@ class TokenManager:
         return await task
 
     async def _do_refresh_at(self, token_id: int, st: str) -> bool:
-        """执行 AT 刷新的核心逻辑
+        """Core logic for performing an AT refresh.
 
         Args:
             token_id: Token ID
@@ -491,14 +490,12 @@ class TokenManager:
             True if refresh successful AND AT is valid, False otherwise
         """
         try:
-            debug_logger.log_info(f"[AT_REFRESH] Token {token_id}: 开始刷新AT...")
+            debug_logger.log_info(f"[AT_REFRESH] Token {token_id}: starting AT refresh...")
 
-            # 使用ST转AT
             result = await self.flow_client.st_to_at(st)
             new_at = result["access_token"]
             expires = result.get("expires")
 
-            # 解析过期时间
             new_at_expires = None
             if expires:
                 try:
@@ -506,17 +503,15 @@ class TokenManager:
                 except:
                     pass
 
-            # 更新数据库
             await self.db.update_token(
                 token_id,
                 at=new_at,
                 at_expires=new_at_expires
             )
 
-            debug_logger.log_info(f"[AT_REFRESH] Token {token_id}: AT刷新成功")
-            debug_logger.log_info(f"  - 新过期时间: {new_at_expires}")
+            debug_logger.log_info(f"[AT_REFRESH] Token {token_id}: AT refresh succeeded")
+            debug_logger.log_info(f"  - new expiry: {new_at_expires}")
 
-            # 验证 AT 有效性：通过 get_credits 测试
             try:
                 credits_result = await self.flow_client.get_credits(new_at)
                 await self.db.update_token(
@@ -524,52 +519,50 @@ class TokenManager:
                     credits=credits_result.get("credits", 0),
                     user_paygate_tier=credits_result.get("userPaygateTier"),
                 )
-                debug_logger.log_info(f"[AT_REFRESH] Token {token_id}: AT 验证成功（余额: {credits_result.get('credits', 0)}）")
+                debug_logger.log_info(f"[AT_REFRESH] Token {token_id}: AT validated (credits: {credits_result.get('credits', 0)})")
                 record_token_refresh("at", "success")
                 return True
             except Exception as verify_err:
-                # AT 验证失败（可能返回 401），说明 ST 已过期
                 error_msg = str(verify_err)
                 if "401" in error_msg or "UNAUTHENTICATED" in error_msg:
-                    debug_logger.log_warning(f"[AT_REFRESH] Token {token_id}: AT 验证失败 (401)，ST 可能已过期")
+                    debug_logger.log_warning(f"[AT_REFRESH] Token {token_id}: AT validation failed (401), ST may be expired")
                     record_token_refresh("at", "failure")
                     return False
                 else:
-                    # 其他错误（如网络问题），仍视为成功
-                    debug_logger.log_warning(f"[AT_REFRESH] Token {token_id}: AT 验证时发生非认证错误: {error_msg}")
+                    # Non-auth error (e.g. network); treat refresh as successful
+                    debug_logger.log_warning(f"[AT_REFRESH] Token {token_id}: non-auth error during AT validation: {error_msg}")
                     record_token_refresh("at", "success")
                     return True
 
         except Exception as e:
-            debug_logger.log_error(f"[AT_REFRESH] Token {token_id}: AT刷新失败 - {str(e)}")
+            debug_logger.log_error(f"[AT_REFRESH] Token {token_id}: AT refresh failed - {str(e)}")
             record_token_refresh("at", "failure")
             return False
 
     async def _try_refresh_st(self, token_id: int, token) -> Optional[str]:
-        """尝试通过浏览器刷新 Session Token
+        """Attempt to refresh the Session Token via the browser resident tab.
 
-        使用常驻 tab 获取新的 __Secure-next-auth.session-token
+        Fetches a new __Secure-next-auth.session-token using the persistent tab.
 
         Args:
             token_id: Token ID
-            token: Token 对象
+            token: Token object
 
         Returns:
-            新的 ST 字符串，如果失败返回 None
+            New ST string, or None on failure
         """
         try:
             from ..core.config import config
 
-            # 仅在 personal 模式下支持 ST 自动刷新
             if config.captcha_method != "personal":
-                debug_logger.log_info(f"[ST_REFRESH] 非 personal 模式，跳过 ST 自动刷新")
+                debug_logger.log_info(f"[ST_REFRESH] Not in personal mode, skipping ST auto-refresh")
                 return None
 
             if not token.current_project_id:
-                debug_logger.log_warning(f"[ST_REFRESH] Token {token_id} 没有 project_id，无法刷新 ST")
+                debug_logger.log_warning(f"[ST_REFRESH] Token {token_id} has no project_id, cannot refresh ST")
                 return None
 
-            debug_logger.log_info(f"[ST_REFRESH] Token {token_id}: 尝试通过浏览器刷新 ST...")
+            debug_logger.log_info(f"[ST_REFRESH] Token {token_id}: attempting ST refresh via browser...")
 
             from .browser_captcha_personal import BrowserCaptchaService
             service = await BrowserCaptchaService.get_instance(self.db)
@@ -582,27 +575,26 @@ class TokenManager:
                 )
             except asyncio.TimeoutError:
                 debug_logger.log_error(
-                    f"[ST_REFRESH] Token {token_id}: 刷新 ST 超时 ({refresh_timeout_seconds:.0f}s)"
+                    f"[ST_REFRESH] Token {token_id}: ST refresh timed out ({refresh_timeout_seconds:.0f}s)"
                 )
                 record_token_refresh("st", "failure")
                 return None
             if new_st and new_st != token.st:
-                # 更新数据库中的 ST
                 await self.db.update_token(token_id, st=new_st)
-                debug_logger.log_info(f"[ST_REFRESH] Token {token_id}: ST 已自动更新")
+                debug_logger.log_info(f"[ST_REFRESH] Token {token_id}: ST updated automatically")
                 record_token_refresh("st", "success")
                 return new_st
             elif new_st == token.st:
-                debug_logger.log_warning(f"[ST_REFRESH] Token {token_id}: 获取到的 ST 与原 ST 相同，可能登录已失效")
+                debug_logger.log_warning(f"[ST_REFRESH] Token {token_id}: retrieved ST identical to current, session may be expired")
                 record_token_refresh("st", "failure")
                 return None
             else:
-                debug_logger.log_warning(f"[ST_REFRESH] Token {token_id}: 无法获取新 ST")
+                debug_logger.log_warning(f"[ST_REFRESH] Token {token_id}: failed to obtain new ST")
                 record_token_refresh("st", "failure")
                 return None
 
         except Exception as e:
-            debug_logger.log_error(f"[ST_REFRESH] Token {token_id}: 刷新 ST 失败 - {str(e)}")
+            debug_logger.log_error(f"[ST_REFRESH] Token {token_id}: ST refresh failed - {str(e)}")
             record_token_refresh("st", "failure")
             return None
 
@@ -672,12 +664,12 @@ class TokenManager:
         await self.db.reset_error_count(token_id)
 
     async def ban_token_for_429(self, token_id: int):
-        """因429错误立即禁用token
+        """Immediately disable a token due to a 429 error.
 
         Args:
             token_id: Token ID
         """
-        debug_logger.log_warning(f"[429_BAN] 禁用Token {token_id} (原因: 429 Rate Limit)")
+        debug_logger.log_warning(f"[429_BAN] Disabling token {token_id} (reason: 429 Rate Limit)")
         await self.db.update_token(
             token_id,
             is_active=False,
@@ -686,54 +678,46 @@ class TokenManager:
         )
 
     async def auto_unban_429_tokens(self):
-        """自动解禁因429被禁用的token
+        """Automatically unban tokens that were disabled due to a 429 error.
 
-        规则:
-        - 距离禁用时间12小时后自动解禁
-        - 仅解禁未过期的token
-        - 仅解禁因429被禁用的token
+        Rules:
+        - Unban 12 hours after the ban timestamp
+        - Only unban tokens that have not expired
+        - Only unban tokens banned for 429
         """
         all_tokens = await self.db.get_all_tokens()
         now = datetime.now(timezone.utc)
 
         for token in all_tokens:
-            # 跳过非429禁用的token
             if token.ban_reason != "429_rate_limit":
                 continue
 
-            # 跳过未禁用的token
             if token.is_active:
                 continue
 
-            # 跳过没有禁用时间的token
             if not token.banned_at:
                 continue
 
-            # 检查token是否已过期
             if token.at_expires:
-                # 确保时区一致
                 if token.at_expires.tzinfo is None:
                     at_expires_aware = token.at_expires.replace(tzinfo=timezone.utc)
                 else:
                     at_expires_aware = token.at_expires
 
-                # 如果已过期，跳过
                 if at_expires_aware <= now:
-                    debug_logger.log_info(f"[AUTO_UNBAN] Token {token.id} 已过期，跳过解禁")
+                    debug_logger.log_info(f"[AUTO_UNBAN] Token {token.id} is expired, skipping unban")
                     continue
 
-            # 确保banned_at时区一致
             if token.banned_at.tzinfo is None:
                 banned_at_aware = token.banned_at.replace(tzinfo=timezone.utc)
             else:
                 banned_at_aware = token.banned_at
 
-            # 检查是否已过12小时
             time_since_ban = now - banned_at_aware
-            if time_since_ban.total_seconds() >= 12 * 3600:  # 12小时
+            if time_since_ban.total_seconds() >= 12 * 3600:
                 debug_logger.log_info(
-                    f"[AUTO_UNBAN] 解禁Token {token.id} (禁用时间: {banned_at_aware}, "
-                    f"已过 {time_since_ban.total_seconds() / 3600:.1f} 小时)"
+                    f"[AUTO_UNBAN] Unbanning token {token.id} (banned at: {banned_at_aware}, "
+                    f"elapsed: {time_since_ban.total_seconds() / 3600:.1f}h)"
                 )
                 await self.db.update_token(
                     token.id,
@@ -741,13 +725,12 @@ class TokenManager:
                     ban_reason=None,
                     banned_at=None
                 )
-                # 重置错误计数
                 await self.db.reset_error_count(token.id)
 
-    # ========== 余额刷新 ==========
+    # ========== Credit Refresh ==========
 
     async def refresh_credits(self, token_id: int) -> int:
-        """刷新Token余额
+        """Refresh the credit balance for a token.
 
         Returns:
             credits
@@ -756,7 +739,6 @@ class TokenManager:
         if not token:
             return 0
 
-        # 确保AT有效
         token = await self.ensure_valid_token(token)
         if not token:
             return 0
@@ -766,7 +748,6 @@ class TokenManager:
             credits = result.get("credits", 0)
             user_paygate_tier = result.get("userPaygateTier")
 
-            # 更新数据库
             await self.db.update_token(
                 token_id,
                 credits=credits,

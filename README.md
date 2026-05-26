@@ -7,240 +7,240 @@
 [![FastAPI](https://img.shields.io/badge/fastapi-0.119.0-green.svg)](https://fastapi.tiangolo.com/)
 [![Docker](https://img.shields.io/badge/docker-supported-blue.svg)](https://www.docker.com/)
 
-**一个功能完整的 OpenAI 兼容 API 服务，为 Flow 提供统一的接口**
+**A fully-featured OpenAI-compatible API service providing a unified interface for Flow**
 
 </div>
 
-## ✨ 核心特性
+## ✨ Core Features
 
-- 🎨 **文生图** / **图生图**
-- 🎬 **文生视频** / **图生视频**
-- 🎞️ **首尾帧视频**
-- 🔄 **AT/ST自动刷新** - AT 过期自动刷新，ST 过期时自动通过浏览器更新（personal 模式）
-- 📊 **余额显示** - 实时查询和显示 VideoFX Credits
-- 🚀 **负载均衡** - 多 Token 轮询和并发控制
-- 🌐 **代理支持** - 支持 HTTP/SOCKS5 代理
-- 📱 **Web 管理界面** - 直观的 Token 和配置管理
-- 🎨 **图片生成连续对话**
-- 🧩 **Gemini 官方请求体兼容** - 支持 `generateContent` / `streamGenerateContent`、`systemInstruction`、`contents.parts.text/inlineData/fileData`
-- ✅ **Gemini 官方格式已实测出图** - 已使用真实 Token 验证 `/models/{model}:generateContent` 可正常返回官方 `candidates[].content.parts[].inlineData`
+- 🎨 **Text-to-Image** / **Image-to-Image**
+- 🎬 **Text-to-Video** / **Image-to-Video**
+- 🎞️ **First/Last Frame Video**
+- 🔄 **AT/ST Auto-refresh** - AT refreshes automatically on expiry; ST refreshes via browser when expired (personal mode)
+- 📊 **Balance Display** - Real-time query and display of VideoFX Credits
+- 🚀 **Load Balancing** - Multi-token round-robin with concurrency control
+- 🌐 **Proxy Support** - HTTP/SOCKS5 proxy support
+- 📱 **Web Admin UI** - Intuitive token and configuration management
+- 🎨 **Continuous image generation conversation**
+- 🧩 **Gemini official request body compatible** - Supports `generateContent` / `streamGenerateContent`, `systemInstruction`, `contents.parts.text/inlineData/fileData`
+- ✅ **Gemini official format tested and verified** - Confirmed with real tokens that `/models/{model}:generateContent` correctly returns `candidates[].content.parts[].inlineData`
 
-## 🚀 快速开始
+## 🚀 Quick Start
 
-### 前置要求
+### Prerequisites
 
-- Docker 和 Docker Compose（推荐）
-- 或 Python 3.8+
+- Docker and Docker Compose (recommended)
+- Or Python 3.8+
 
-- 由于Flow增加了额外的验证码，你可以自行选择使用浏览器打码或第三发打码：
-注册[YesCaptcha](https://yescaptcha.com/i/13Xd8K)并获取api key，将其填入系统配置页面```YesCaptcha API密钥```区域
-- YesCaptcha 支持在管理页切换 `type`：`RecaptchaV3TaskProxyless`、`RecaptchaV3TaskProxylessM1`、`RecaptchaV3TaskProxylessM1S7`、`RecaptchaV3TaskProxylessM1S9`；S7/S9 会强制提交 `minScore` 0.7/0.9。
-- 默认 `docker-compose.yml` 建议搭配第三方打码（yescaptcha/capmonster/ezcaptcha/capsolver）。
-如需 Docker 内有头打码（browser/personal），请使用下方 `docker-compose.headed.yml`。
+- Since Flow added extra CAPTCHAs, you can choose browser-based or third-party CAPTCHA solving:
+Register at [YesCaptcha](https://yescaptcha.com/i/13Xd8K) to get an API key, and enter it in the system config page under ```YesCaptcha API Key```
+- YesCaptcha supports switching `type` in the admin page: `RecaptchaV3TaskProxyless`, `RecaptchaV3TaskProxylessM1`, `RecaptchaV3TaskProxylessM1S7`, `RecaptchaV3TaskProxylessM1S9`; S7/S9 force-submit `minScore` 0.7/0.9.
+- The default `docker-compose.yml` is recommended with third-party CAPTCHA solvers (yescaptcha/capmonster/ezcaptcha/capsolver).
+For headed browser CAPTCHA inside Docker (browser/personal mode), use `docker-compose.headed.yml` below.
 
-- 自动更新st浏览器拓展：[Flow2API-Token-Updater](https://github.com/TheSmallHanCat/Flow2API-Token-Updater)
+- Auto-update ST browser extension: [Flow2API-Token-Updater](https://github.com/TheSmallHanCat/Flow2API-Token-Updater)
 
-### 方式一：Docker 部署（推荐）
+### Method 1: Docker Deployment (Recommended)
 
-#### 标准模式（不使用代理）
+#### Standard Mode (no proxy)
 
 ```bash
-# 克隆项目
+# Clone the repository
 git clone https://github.com/TheSmallHanCat/flow2api.git
 cd flow2api
 
-# 启动服务
+# Start the service
 docker-compose up -d
 
-# 查看日志
+# View logs
 docker-compose logs -f
 ```
 
-> 说明：Compose 已默认挂载 `./tmp:/app/tmp`。如果把缓存超时设为 `0`，语义是“不自动过期删除”；若希望容器重建后仍保留缓存文件，也需要保留这个 `tmp` 挂载。
+> Note: Compose mounts `./tmp:/app/tmp` by default. Setting cache timeout to `0` means “never auto-expire/delete”; to retain cached files after container rebuild, keep this `tmp` mount.
 
-#### WARP 模式（使用代理）
+#### WARP Mode (with proxy)
 
 ```bash
-# 使用 WARP 代理启动
+# Start with WARP proxy
 docker-compose -f docker-compose.warp.yml up -d
 
-# 查看日志
+# View logs
 docker-compose -f docker-compose.warp.yml logs -f
 ```
 
-#### Docker 有头打码模式（browser / personal）
+#### Docker Headed Browser Mode (browser / personal)
 
-> 适用于你有虚拟化桌面需求、希望在容器里启用有头浏览器打码的场景。  
-> 该模式默认启动 `Xvfb + Fluxbox` 实现容器内部可视化，并设置 `ALLOW_DOCKER_HEADED_CAPTCHA=true`。  
-> 仅开放应用端口，不提供任何远程桌面连接端口。
-> `personal` 内置浏览器现在默认按有头模式启动；如需临时切回无头，可额外设置环境变量 `PERSONAL_BROWSER_HEADLESS=true`。
+> For scenarios requiring a virtualized desktop to enable headed browser CAPTCHA solving inside a container.  
+> This mode starts `Xvfb + Fluxbox` by default for in-container display, and sets `ALLOW_DOCKER_HEADED_CAPTCHA=true`.  
+> Only the application port is exposed; no remote desktop ports are opened.
+> The `personal` built-in browser now starts in headed mode by default; to temporarily switch back to headless, set `PERSONAL_BROWSER_HEADLESS=true`.
 
 ```bash
-# 启动有头模式（首次建议带 --build）
+# Start headed mode (first run: include --build)
 docker compose -f docker-compose.headed.yml up -d --build
 
-# 查看日志
+# View logs
 docker compose -f docker-compose.headed.yml logs -f
 ```
 
-- API 端口：`8000`
-- 进入管理后台后，将验证码方式设为 `browser` 或 `personal`
+- API port: `8000`
+- After entering the admin panel, set the CAPTCHA method to `browser` or `personal`
 
-### 方式二：本地部署
+### Method 2: Local Deployment
 
 ```bash
-# 克隆项目
+# Clone the repository
 git clone https://github.com/TheSmallHanCat/flow2api.git
 cd flow2api
 
-# 创建虚拟环境
+# Create virtual environment
 python -m venv venv
 
-# 激活虚拟环境
+# Activate virtual environment
 # Windows
 venv\Scripts\activate
 # Linux/Mac
 source venv/bin/activate
 
-# 安装依赖
+# Install dependencies
 pip install -r requirements.txt
 
-# 启动服务
+# Start the service
 python main.py
 ```
 
-### 首次访问
+### First Access
 
-服务启动后,访问管理后台: **http://localhost:8000**,首次登录后请立即修改密码!
+After the service starts, visit the admin panel at **http://localhost:8000**. Change your password immediately after first login!
 
-- **用户名**: `admin`
-- **密码**: `admin`
+- **Username**: `admin`
+- **Password**: `admin`
 
-## 📈 监控接口
+## 📈 Monitoring Endpoints
 
-- `GET /health`：公开健康检查，返回服务是否存活、活跃 Token 数、即将过期 Token 数、已过期 Token 数、429 禁用数等摘要
-- `GET /metrics`：Prometheus 指标接口
-- `GET /api/tokens`：管理接口，返回 `at_expires`、`at_expired`、`at_expiring_within_1h`、`ban_reason`、`consecutive_error_count` 等 Token 状态
+- `GET /health`: Public health check. Returns service status, active token count, soon-to-expire tokens, expired tokens, 429-banned count, and other summary data.
+- `GET /metrics`: Prometheus metrics endpoint.
+- `GET /api/tokens`: Admin endpoint. Returns token states including `at_expires`, `at_expired`, `at_expiring_within_1h`, `ban_reason`, `consecutive_error_count`, etc.
 
-Prometheus 可直接抓 `/metrics`。如果部署到 Kubernetes，建议只在集群内抓取，并在 Ingress/Gateway 层单独限制 `/metrics` 的外部访问。
+Prometheus can scrape `/metrics` directly. For Kubernetes deployments, scrape only within the cluster and restrict external access to `/metrics` at the Ingress/Gateway layer.
 
-### 模型测试页面
+### Model Test Page
 
-访问 **http://localhost:8000/test** 可打开内置的模型测试页面，支持：
+Visit **http://localhost:8000/test** to open the built-in model test page, which supports:
 
-- 按分类浏览所有可用模型（图片生成、文/图生视频、多图视频、视频放大等）
-- 输入提示词一键测试，流式显示生成进度
-- 图生图 / 图生视频场景支持上传图片
-- 生成完成后直接预览图片或视频
+- Browse all available models by category (image generation, text/image-to-video, multi-image video, video upscale, etc.)
+- Enter a prompt and test with one click; generation progress streams live
+- Image-to-image / image-to-video scenarios support image upload
+- Preview generated images or videos directly after completion
 
-## 📋 支持的模型
+## 📋 Supported Models
 
-### 图片生成
+### Image Generation
 
-| 模型名称 | 说明| 尺寸 |
+| Model Name | Description | Aspect Ratio |
 |---------|--------|--------|
-| `gemini-3.0-pro-image-landscape` | 图/文生图 | 横屏 |
-| `gemini-3.0-pro-image-portrait` | 图/文生图 | 竖屏 |
-| `gemini-3.0-pro-image-square` | 图/文生图 | 方图 |
-| `gemini-3.0-pro-image-four-three` | 图/文生图 | 横屏 4:3 |
-| `gemini-3.0-pro-image-three-four` | 图/文生图 | 竖屏 3:4 |
-| `gemini-3.0-pro-image-landscape-2k` | 图/文生图(2K) | 横屏 |
-| `gemini-3.0-pro-image-portrait-2k` | 图/文生图(2K) | 竖屏 |
-| `gemini-3.0-pro-image-square-2k` | 图/文生图(2K) | 方图 |
-| `gemini-3.0-pro-image-four-three-2k` | 图/文生图(2K) | 横屏 4:3 |
-| `gemini-3.0-pro-image-three-four-2k` | 图/文生图(2K) | 竖屏 3:4 |
-| `gemini-3.0-pro-image-landscape-4k` | 图/文生图(4K) | 横屏 |
-| `gemini-3.0-pro-image-portrait-4k` | 图/文生图(4K) | 竖屏 |
-| `gemini-3.0-pro-image-square-4k` | 图/文生图(4K) | 方图 |
-| `gemini-3.0-pro-image-four-three-4k` | 图/文生图(4K) | 横屏 4:3 |
-| `gemini-3.0-pro-image-three-four-4k` | 图/文生图(4K) | 竖屏 3:4 |
-| `imagen-4.0-generate-preview-landscape` | 图/文生图 | 横屏 |
-| `imagen-4.0-generate-preview-portrait` | 图/文生图 | 竖屏 |
-| `gemini-3.1-flash-image-landscape` | 图/文生图 | 横屏 |
-| `gemini-3.1-flash-image-portrait` | 图/文生图 | 竖屏 |
-| `gemini-3.1-flash-image-square` | 图/文生图 | 方图 |
-| `gemini-3.1-flash-image-four-three` | 图/文生图 | 横屏 4:3 |
-| `gemini-3.1-flash-image-three-four` | 图/文生图 | 竖屏 3:4 |
-| `gemini-3.1-flash-image-landscape-2k` | 图/文生图(2K) | 横屏 |
-| `gemini-3.1-flash-image-portrait-2k` | 图/文生图(2K) | 竖屏 |
-| `gemini-3.1-flash-image-square-2k` | 图/文生图(2K) | 方图 |
-| `gemini-3.1-flash-image-four-three-2k` | 图/文生图(2K) | 横屏 4:3 |
-| `gemini-3.1-flash-image-three-four-2k` | 图/文生图(2K) | 竖屏 3:4 |
-| `gemini-3.1-flash-image-landscape-4k` | 图/文生图(4K) | 横屏 |
-| `gemini-3.1-flash-image-portrait-4k` | 图/文生图(4K) | 竖屏 |
-| `gemini-3.1-flash-image-square-4k` | 图/文生图(4K) | 方图 |
-| `gemini-3.1-flash-image-four-three-4k` | 图/文生图(4K) | 横屏 4:3 |
-| `gemini-3.1-flash-image-three-four-4k` | 图/文生图(4K) | 竖屏 3:4 |
+| `gemini-3.0-pro-image-landscape` | Image/Text-to-Image | Landscape |
+| `gemini-3.0-pro-image-portrait` | Image/Text-to-Image | Portrait |
+| `gemini-3.0-pro-image-square` | Image/Text-to-Image | Square |
+| `gemini-3.0-pro-image-four-three` | Image/Text-to-Image | Landscape 4:3 |
+| `gemini-3.0-pro-image-three-four` | Image/Text-to-Image | Portrait 3:4 |
+| `gemini-3.0-pro-image-landscape-2k` | Image/Text-to-Image (2K) | Landscape |
+| `gemini-3.0-pro-image-portrait-2k` | Image/Text-to-Image (2K) | Portrait |
+| `gemini-3.0-pro-image-square-2k` | Image/Text-to-Image (2K) | Square |
+| `gemini-3.0-pro-image-four-three-2k` | Image/Text-to-Image (2K) | Landscape 4:3 |
+| `gemini-3.0-pro-image-three-four-2k` | Image/Text-to-Image (2K) | Portrait 3:4 |
+| `gemini-3.0-pro-image-landscape-4k` | Image/Text-to-Image (4K) | Landscape |
+| `gemini-3.0-pro-image-portrait-4k` | Image/Text-to-Image (4K) | Portrait |
+| `gemini-3.0-pro-image-square-4k` | Image/Text-to-Image (4K) | Square |
+| `gemini-3.0-pro-image-four-three-4k` | Image/Text-to-Image (4K) | Landscape 4:3 |
+| `gemini-3.0-pro-image-three-four-4k` | Image/Text-to-Image (4K) | Portrait 3:4 |
+| `imagen-4.0-generate-preview-landscape` | Image/Text-to-Image | Landscape |
+| `imagen-4.0-generate-preview-portrait` | Image/Text-to-Image | Portrait |
+| `gemini-3.1-flash-image-landscape` | Image/Text-to-Image | Landscape |
+| `gemini-3.1-flash-image-portrait` | Image/Text-to-Image | Portrait |
+| `gemini-3.1-flash-image-square` | Image/Text-to-Image | Square |
+| `gemini-3.1-flash-image-four-three` | Image/Text-to-Image | Landscape 4:3 |
+| `gemini-3.1-flash-image-three-four` | Image/Text-to-Image | Portrait 3:4 |
+| `gemini-3.1-flash-image-landscape-2k` | Image/Text-to-Image (2K) | Landscape |
+| `gemini-3.1-flash-image-portrait-2k` | Image/Text-to-Image (2K) | Portrait |
+| `gemini-3.1-flash-image-square-2k` | Image/Text-to-Image (2K) | Square |
+| `gemini-3.1-flash-image-four-three-2k` | Image/Text-to-Image (2K) | Landscape 4:3 |
+| `gemini-3.1-flash-image-three-four-2k` | Image/Text-to-Image (2K) | Portrait 3:4 |
+| `gemini-3.1-flash-image-landscape-4k` | Image/Text-to-Image (4K) | Landscape |
+| `gemini-3.1-flash-image-portrait-4k` | Image/Text-to-Image (4K) | Portrait |
+| `gemini-3.1-flash-image-square-4k` | Image/Text-to-Image (4K) | Square |
+| `gemini-3.1-flash-image-four-three-4k` | Image/Text-to-Image (4K) | Landscape 4:3 |
+| `gemini-3.1-flash-image-three-four-4k` | Image/Text-to-Image (4K) | Portrait 3:4 |
 
-### 视频生成
+### Video Generation
 
-#### 文生视频 (T2V - Text to Video)
-⚠️ **不支持上传图片**
+#### Text to Video (T2V)
+⚠️ **Does not support image uploads**
 
-| 模型名称 | 说明| 尺寸 |
+| Model Name | Description | Aspect Ratio |
 |---------|---------|--------|
-| `veo_3_1_t2v_fast_portrait` | 文生视频 | 竖屏 |
-| `veo_3_1_t2v_fast_landscape` | 文生视频 | 横屏 |
-| `veo_3_1_t2v_fast_portrait_ultra` | 文生视频 | 竖屏 |
-| `veo_3_1_t2v_fast_ultra` | 文生视频 | 横屏 |
-| `veo_3_1_t2v_fast_portrait_ultra_relaxed` | 文生视频 | 竖屏 |
-| `veo_3_1_t2v_fast_ultra_relaxed` | 文生视频 | 横屏 |
-| `veo_3_1_t2v_portrait` | 文生视频 | 竖屏 |
-| `veo_3_1_t2v_landscape` | 文生视频 | 横屏 |
-| `veo_3_1_t2v_landscape_4s` | 文生视频 4秒 | 横屏 |
-| `veo_3_1_t2v_portrait_4s` | 文生视频 4秒 | 竖屏 |
-| `veo_3_1_t2v_landscape_6s` | 文生视频 6秒 | 横屏 |
-| `veo_3_1_t2v_portrait_6s` | 文生视频 6秒 | 竖屏 |
-| `veo_3_1_t2v_fast_landscape_4s` | 文生视频 Fast 4秒 | 横屏 |
-| `veo_3_1_t2v_fast_portrait_4s` | 文生视频 Fast 4秒 | 竖屏 |
-| `veo_3_1_t2v_fast_landscape_6s` | 文生视频 Fast 6秒 | 横屏 |
-| `veo_3_1_t2v_fast_portrait_6s` | 文生视频 Fast 6秒 | 竖屏 |
-| `veo_3_1_t2v_lite_portrait` | 文生视频 Lite | 竖屏 |
-| `veo_3_1_t2v_lite_landscape` | 文生视频 Lite | 横屏 |
-| `veo_3_1_t2v_lite_4s_portrait` | 文生视频 Lite 4秒 | 竖屏 |
-| `veo_3_1_t2v_lite_4s_landscape` | 文生视频 Lite 4秒 | 横屏 |
-| `veo_3_1_t2v_lite_6s_portrait` | 文生视频 Lite 6秒 | 竖屏 |
-| `veo_3_1_t2v_lite_6s_landscape` | 文生视频 Lite 6秒 | 横屏 |
+| `veo_3_1_t2v_fast_portrait` | Text-to-Video | Portrait |
+| `veo_3_1_t2v_fast_landscape` | Text-to-Video | Landscape |
+| `veo_3_1_t2v_fast_portrait_ultra` | Text-to-Video | Portrait |
+| `veo_3_1_t2v_fast_ultra` | Text-to-Video | Landscape |
+| `veo_3_1_t2v_fast_portrait_ultra_relaxed` | Text-to-Video | Portrait |
+| `veo_3_1_t2v_fast_ultra_relaxed` | Text-to-Video | Landscape |
+| `veo_3_1_t2v_portrait` | Text-to-Video | Portrait |
+| `veo_3_1_t2v_landscape` | Text-to-Video | Landscape |
+| `veo_3_1_t2v_landscape_4s` | Text-to-Video 4s | Landscape |
+| `veo_3_1_t2v_portrait_4s` | Text-to-Video 4s | Portrait |
+| `veo_3_1_t2v_landscape_6s` | Text-to-Video 6s | Landscape |
+| `veo_3_1_t2v_portrait_6s` | Text-to-Video 6s | Portrait |
+| `veo_3_1_t2v_fast_landscape_4s` | Text-to-Video Fast 4s | Landscape |
+| `veo_3_1_t2v_fast_portrait_4s` | Text-to-Video Fast 4s | Portrait |
+| `veo_3_1_t2v_fast_landscape_6s` | Text-to-Video Fast 6s | Landscape |
+| `veo_3_1_t2v_fast_portrait_6s` | Text-to-Video Fast 6s | Portrait |
+| `veo_3_1_t2v_lite_portrait` | Text-to-Video Lite | Portrait |
+| `veo_3_1_t2v_lite_landscape` | Text-to-Video Lite | Landscape |
+| `veo_3_1_t2v_lite_4s_portrait` | Text-to-Video Lite 4s | Portrait |
+| `veo_3_1_t2v_lite_4s_landscape` | Text-to-Video Lite 4s | Landscape |
+| `veo_3_1_t2v_lite_6s_portrait` | Text-to-Video Lite 6s | Portrait |
+| `veo_3_1_t2v_lite_6s_landscape` | Text-to-Video Lite 6s | Landscape |
 
-#### 首尾帧模型 (I2V - Image to Video)
-📸 **支持1-2张图片：1张作为首帧，2张作为首尾帧**
+#### First/Last Frame Model (I2V - Image to Video)
+📸 **Supports 1-2 images: 1 as start frame, 2 as start+end frames**
 
-> 💡 **自动适配**：系统会根据图片数量自动选择对应的 model_key
-> - **单帧模式**（1张图）：使用首帧生成视频
-> - **双帧模式**（2张图）：使用首帧+尾帧生成过渡视频
-> - `veo_3_1_i2v_lite_*` 仅支持 **1 张** 首帧图片
-> - `veo_3_1_interpolation_lite_*` 仅支持 **2 张** 首尾帧图片
+> 💡 **Auto-adaptation**: The system automatically selects the corresponding model_key based on the number of images
+> - **Single-frame mode** (1 image): generates video from start frame
+> - **Dual-frame mode** (2 images): generates transition video from start+end frames
+> - `veo_3_1_i2v_lite_*` supports only **1** start frame image
+> - `veo_3_1_interpolation_lite_*` supports only **2** start+end frame images
 
-| 模型名称 | 说明| 尺寸 |
+| Model Name | Description | Aspect Ratio |
 |---------|---------|--------|
-| `veo_3_1_i2v_s_fast_portrait_fl` | 图生视频 | 竖屏 |
-| `veo_3_1_i2v_s_fast_fl` | 图生视频 | 横屏 |
-| `veo_3_1_i2v_s_fast_portrait_ultra_fl` | 图生视频 | 竖屏 |
-| `veo_3_1_i2v_s_fast_ultra_fl` | 图生视频 | 横屏 |
-| `veo_3_1_i2v_s_fast_portrait_ultra_relaxed` | 图生视频 | 竖屏 |
-| `veo_3_1_i2v_s_fast_ultra_relaxed` | 图生视频 | 横屏 |
-| `veo_3_1_i2v_s_portrait` | 图生视频 | 竖屏 |
-| `veo_3_1_i2v_s_landscape` | 图生视频 | 横屏 |
-| `veo_3_1_i2v_s_landscape_4s` | 图生视频 4秒 | 横屏 |
-| `veo_3_1_i2v_s_portrait_4s` | 图生视频 4秒 | 竖屏 |
-| `veo_3_1_i2v_s_landscape_6s` | 图生视频 6秒 | 横屏 |
-| `veo_3_1_i2v_s_portrait_6s` | 图生视频 6秒 | 竖屏 |
-| `veo_3_1_i2v_s_fast_landscape_4s_fl` | 图生视频 Fast 4秒 | 横屏 |
-| `veo_3_1_i2v_s_fast_portrait_4s_fl` | 图生视频 Fast 4秒 | 竖屏 |
-| `veo_3_1_i2v_s_fast_landscape_6s_fl` | 图生视频 Fast 6秒 | 横屏 |
-| `veo_3_1_i2v_s_fast_portrait_6s_fl` | 图生视频 Fast 6秒 | 竖屏 |
-| `veo_3_1_i2v_lite_portrait` | 图生视频 Lite（仅首帧） | 竖屏 |
-| `veo_3_1_i2v_lite_landscape` | 图生视频 Lite（仅首帧） | 横屏 |
-| `veo_3_1_i2v_lite_4s_portrait` | 图生视频 Lite 4秒（仅首帧） | 竖屏 |
-| `veo_3_1_i2v_lite_4s_landscape` | 图生视频 Lite 4秒（仅首帧） | 横屏 |
-| `veo_3_1_i2v_lite_6s_portrait` | 图生视频 Lite 6秒（仅首帧） | 竖屏 |
-| `veo_3_1_i2v_lite_6s_landscape` | 图生视频 Lite 6秒（仅首帧） | 横屏 |
-| `veo_3_1_interpolation_lite_portrait` | 图生视频 Lite（首尾帧过渡） | 竖屏 |
-| `veo_3_1_interpolation_lite_landscape` | 图生视频 Lite（首尾帧过渡） | 横屏 |
-| `veo_3_1_interpolation_lite_4s_portrait` | 图生视频 Lite 4秒（首尾帧过渡） | 竖屏 |
-| `veo_3_1_interpolation_lite_4s_landscape` | 图生视频 Lite 4秒（首尾帧过渡） | 横屏 |
-| `veo_3_1_interpolation_lite_6s_portrait` | 图生视频 Lite 6秒（首尾帧过渡） | 竖屏 |
-| `veo_3_1_interpolation_lite_6s_landscape` | 图生视频 Lite 6秒（首尾帧过渡） | 横屏 |
+| `veo_3_1_i2v_s_fast_portrait_fl` | Image-to-Video | Portrait |
+| `veo_3_1_i2v_s_fast_fl` | Image-to-Video | Landscape |
+| `veo_3_1_i2v_s_fast_portrait_ultra_fl` | Image-to-Video | Portrait |
+| `veo_3_1_i2v_s_fast_ultra_fl` | Image-to-Video | Landscape |
+| `veo_3_1_i2v_s_fast_portrait_ultra_relaxed` | Image-to-Video | Portrait |
+| `veo_3_1_i2v_s_fast_ultra_relaxed` | Image-to-Video | Landscape |
+| `veo_3_1_i2v_s_portrait` | Image-to-Video | Portrait |
+| `veo_3_1_i2v_s_landscape` | Image-to-Video | Landscape |
+| `veo_3_1_i2v_s_landscape_4s` | Image-to-Video 4s | Landscape |
+| `veo_3_1_i2v_s_portrait_4s` | Image-to-Video 4s | Portrait |
+| `veo_3_1_i2v_s_landscape_6s` | Image-to-Video 6s | Landscape |
+| `veo_3_1_i2v_s_portrait_6s` | Image-to-Video 6s | Portrait |
+| `veo_3_1_i2v_s_fast_landscape_4s_fl` | Image-to-Video Fast 4s | Landscape |
+| `veo_3_1_i2v_s_fast_portrait_4s_fl` | Image-to-Video Fast 4s | Portrait |
+| `veo_3_1_i2v_s_fast_landscape_6s_fl` | Image-to-Video Fast 6s | Landscape |
+| `veo_3_1_i2v_s_fast_portrait_6s_fl` | Image-to-Video Fast 6s | Portrait |
+| `veo_3_1_i2v_lite_portrait` | Image-to-Video Lite (start frame only) | Portrait |
+| `veo_3_1_i2v_lite_landscape` | Image-to-Video Lite (start frame only) | Landscape |
+| `veo_3_1_i2v_lite_4s_portrait` | Image-to-Video Lite 4s (start frame only) | Portrait |
+| `veo_3_1_i2v_lite_4s_landscape` | Image-to-Video Lite 4s (start frame only) | Landscape |
+| `veo_3_1_i2v_lite_6s_portrait` | Image-to-Video Lite 6s (start frame only) | Portrait |
+| `veo_3_1_i2v_lite_6s_landscape` | Image-to-Video Lite 6s (start frame only) | Landscape |
+| `veo_3_1_interpolation_lite_portrait` | Image-to-Video Lite (start+end frame transition) | Portrait |
+| `veo_3_1_interpolation_lite_landscape` | Image-to-Video Lite (start+end frame transition) | Landscape |
+| `veo_3_1_interpolation_lite_4s_portrait` | Image-to-Video Lite 4s (start+end frame transition) | Portrait |
+| `veo_3_1_interpolation_lite_4s_landscape` | Image-to-Video Lite 4s (start+end frame transition) | Landscape |
+| `veo_3_1_interpolation_lite_6s_portrait` | Image-to-Video Lite 6s (start+end frame transition) | Portrait |
+| `veo_3_1_interpolation_lite_6s_landscape` | Image-to-Video Lite 6s (start+end frame transition) | Landscape |
 
 #### 多图生成 (R2V - Reference Images to Video)
 🖼️ **支持多张图片**

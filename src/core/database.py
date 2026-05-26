@@ -426,10 +426,10 @@ class Database:
                     ("video_enabled", "BOOLEAN DEFAULT 1"),
                     ("image_concurrency", "INTEGER DEFAULT -1"),
                     ("video_concurrency", "INTEGER DEFAULT -1"),
-                    ("captcha_proxy_url", "TEXT"),  # token级打码代理
-                    ("extension_route_key", "TEXT"),  # extension 模式路由键
-                    ("ban_reason", "TEXT"),  # 禁用原因
-                    ("banned_at", "TIMESTAMP"),  # 禁用时间
+                    ("captcha_proxy_url", "TEXT"),  # token-level captcha proxy
+                    ("extension_route_key", "TEXT"),  # extension mode route key
+                    ("ban_reason", "TEXT"),  # ban reason
+                    ("banned_at", "TIMESTAMP"),  # ban timestamp
                 ]
 
                 for col_name, col_type in columns_to_add:
@@ -511,7 +511,7 @@ class Database:
                     ("today_video_count", "INTEGER DEFAULT 0"),
                     ("today_error_count", "INTEGER DEFAULT 0"),
                     ("today_date", "DATE"),
-                    ("consecutive_error_count", "INTEGER DEFAULT 0"),  # 🆕 连续错误计数
+                    ("consecutive_error_count", "INTEGER DEFAULT 0"),  # consecutive error count
                 ]
 
                 for col_name, col_type in stats_columns_to_add:
@@ -525,7 +525,7 @@ class Database:
             # Check and add missing columns to plugin_config table
             if await self._table_exists(db, "plugin_config"):
                 plugin_columns_to_add = [
-                    ("auto_enable_on_update", "BOOLEAN DEFAULT 1"),  # 默认开启
+                    ("auto_enable_on_update", "BOOLEAN DEFAULT 1"),  # enabled by default
                 ]
 
                 for col_name, col_type in plugin_columns_to_add:
@@ -566,7 +566,7 @@ class Database:
         async with self._connect(write=True) as db:
             await db.execute("PRAGMA journal_mode = WAL")
             await db.execute("PRAGMA synchronous = NORMAL")
-            # Tokens table (Flow2API版本)
+            # Tokens table (Flow2API version)
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS tokens (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -595,7 +595,7 @@ class Database:
                 )
             """)
 
-            # Projects table (新增)
+            # Projects table
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS projects (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -789,7 +789,7 @@ class Database:
             # Migrate request_logs table if needed
             await self._migrate_request_logs(db)
 
-            # Request logs query indexes (列表按 created_at 排序 / token 过滤)
+            # Request logs query indexes (list sorted by created_at / token filter)
             await db.execute("CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at DESC)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_request_logs_token_id_created_at ON request_logs(token_id, created_at DESC)")
 
@@ -805,7 +805,7 @@ class Database:
             has_operation = await self._column_exists(db, "request_logs", "operation")
 
             if has_model and not has_operation:
-                print("?? ?????request_logs???,????...")
+                print("Migrating request_logs table, adding missing columns...")
                 await db.execute("ALTER TABLE request_logs RENAME TO request_logs_old")
                 await db.execute("""
                     CREATE TABLE request_logs (
@@ -850,7 +850,7 @@ class Database:
                     FROM request_logs_old
                 """)
                 await db.execute("DROP TABLE request_logs_old")
-                print("? request_logs?????")
+                print("Request logs migration complete.")
 
             if not await self._column_exists(db, "request_logs", "status_text"):
                 await db.execute("ALTER TABLE request_logs ADD COLUMN status_text TEXT DEFAULT ''")
@@ -860,7 +860,7 @@ class Database:
                 await db.execute("ALTER TABLE request_logs ADD COLUMN updated_at TIMESTAMP")
             await db.execute("UPDATE request_logs SET updated_at = created_at WHERE updated_at IS NULL")
         except Exception as e:
-            print(f"?? request_logs?????: {e}")
+            print(f"request_logs migration failed: {e}")
             # Continue even if migration fails
 
     # Token operations
@@ -1839,9 +1839,9 @@ class Database:
                 new_remote_timeout = max(5, int(new_remote_timeout)) if new_remote_timeout is not None else 60
                 new_browser_count = max(1, min(20, int(new_browser_count)))
                 new_personal_project_pool_size = max(1, min(50, int(new_personal_project_pool_size)))
-                new_personal_max_tabs = max(1, min(50, int(new_personal_max_tabs)))  # 限制1-50
+                new_personal_max_tabs = max(1, min(50, int(new_personal_max_tabs)))  # clamp 1-50
                 new_personal_fresh_restart_every = max(0, int(new_personal_fresh_restart_every))
-                new_personal_idle_ttl = max(60, int(new_personal_idle_ttl))  # 最少60秒
+                new_personal_idle_ttl = max(60, int(new_personal_idle_ttl))  # minimum 60s
 
                 await db.execute("""
                     UPDATE captcha_config
