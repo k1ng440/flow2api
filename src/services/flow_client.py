@@ -25,9 +25,10 @@ class FlowClient:
     """VideoFX API client"""
 
     # Chrome version pinned here — must stay in sync across impersonate, UA, and sec-ch-ua headers.
-    _CHROME_IMPERSONATE = "chrome131"
-    _CHROME_MAJOR = "131"
-    _CHROME_FULL_VERSIONS = ["131.0.6778.265", "131.0.6778.205", "131.0.6778.140"]
+    # Requires curl-cffi>=0.9.0 for chrome136 profile support.
+    _CHROME_IMPERSONATE = "chrome136"
+    _CHROME_MAJOR = "136"
+    _CHROME_FULL_VERSIONS = ["136.0.7103.114", "136.0.7103.93", "136.0.7103.59"]
 
     def __init__(self, proxy_manager, db=None):
         self.proxy_manager = proxy_manager
@@ -2988,19 +2989,19 @@ class FlowClient:
                 return None, None
         # API captcha service
         elif captcha_method in ["yescaptcha", "capmonster", "ezcaptcha", "capsolver"]:
-            # Set fingerprint for API captcha too (includes proxy), ensuring consistent env between token fetch and subsequent requests
+            # Build a fixed UA that will be passed to the captcha service (via userAgent in createTask)
+            # so the token is minted with the same UA we send in the Flow API request.
+            api_captcha_ua = f"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{self._CHROME_FULL_VERSIONS[0]} Safari/537.36"
+            proxy_url = None
             if self.proxy_manager:
                 try:
                     proxy_url = await self.proxy_manager.get_request_proxy_url()
-                    if proxy_url:
-                        self._set_request_fingerprint({"proxy_url": proxy_url})
-                    else:
-                        self._set_request_fingerprint(None)
                 except Exception as e:
                     debug_logger.log_warning(f"[reCAPTCHA] Failed to get proxy for API captcha: {e}")
-                    self._set_request_fingerprint(None)
-            else:
-                self._set_request_fingerprint(None)
+            fingerprint_ctx: Dict[str, Any] = {"user_agent": api_captcha_ua}
+            if proxy_url:
+                fingerprint_ctx["proxy_url"] = proxy_url
+            self._set_request_fingerprint(fingerprint_ctx)
             token = await self._get_api_captcha_token(captcha_method, project_id, action)
             return token, None
         else:
@@ -3068,13 +3069,17 @@ class FlowClient:
             
             async with AsyncSession() as session:
                 create_url = f"{base_url}/createTask"
+                # Pass our UA so the captcha service mints the token with the same UA
+                # we'll use in the subsequent Flow API request — eliminates token/UA mismatch.
+                captcha_ua = f"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{self._CHROME_FULL_VERSIONS[0]} Safari/537.36"
                 create_data = {
                     "clientKey": client_key,
                     "task": {
                         "websiteURL": website_url,
                         "websiteKey": website_key,
                         "type": task_type,
-                        "pageAction": page_action
+                        "pageAction": page_action,
+                        "userAgent": captcha_ua,
                     }
                 }
                 if min_score is not None:
