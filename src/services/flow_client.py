@@ -3069,9 +3069,6 @@ class FlowClient:
             
             async with AsyncSession() as session:
                 create_url = f"{base_url}/createTask"
-                # Pass our UA so the captcha service mints the token with the same UA
-                # we'll use in the subsequent Flow API request — eliminates token/UA mismatch.
-                captcha_ua = f"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{self._CHROME_FULL_VERSIONS[0]} Safari/537.36"
                 create_data = {
                     "clientKey": client_key,
                     "task": {
@@ -3079,7 +3076,6 @@ class FlowClient:
                         "websiteKey": website_key,
                         "type": task_type,
                         "pageAction": page_action,
-                        "userAgent": captcha_ua,
                     }
                 }
                 if min_score is not None:
