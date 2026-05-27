@@ -24,11 +24,29 @@ except ImportError:
 class FlowClient:
     """VideoFX API client"""
 
-    # Chrome version pinned here — must stay in sync across impersonate, UA, and sec-ch-ua headers.
-    # Requires curl-cffi>=0.9.0 for chrome136 profile support.
-    _CHROME_IMPERSONATE = "chrome136"
-    _CHROME_MAJOR = "136"
-    _CHROME_FULL_VERSIONS = ["136.0.7103.114", "136.0.7103.93", "136.0.7103.59"]
+    # Ordered preference list: (impersonate_profile, major, [full_versions])
+    # The first profile supported by the installed curl_cffi is used.
+    # Run `pip install -r requirements.txt` (curl-cffi>=0.9.0) to unlock chrome136+.
+    _CHROME_PROFILES = [
+        ("chrome136", "136", ["136.0.7103.114", "136.0.7103.93", "136.0.7103.59"]),
+        ("chrome131", "131", ["131.0.6778.265", "131.0.6778.205", "131.0.6778.140"]),
+        ("chrome124", "124", ["124.0.6367.207", "124.0.6367.181", "124.0.6367.119"]),
+    ]
+
+    @classmethod
+    def _detect_chrome_profile(cls) -> tuple:
+        """Return (impersonate, major, versions) for the best profile the installed curl_cffi supports."""
+        try:
+            from curl_cffi.requests.impersonate import BrowserTypeLiteral
+            import typing
+            available = set(typing.get_args(BrowserTypeLiteral))
+            for profile, major, versions in cls._CHROME_PROFILES:
+                if profile in available:
+                    return profile, major, versions
+        except Exception:
+            pass
+        # Fallback: return the lowest-known profile unconditionally
+        return cls._CHROME_PROFILES[-1]
 
     def __init__(self, proxy_manager, db=None):
         self.proxy_manager = proxy_manager
@@ -44,6 +62,10 @@ class FlowClient:
             default=None
         )
         self._remote_browser_prefill_last_sent: Dict[str, float] = {}
+
+        # Detect best Chrome impersonate profile supported by the installed curl_cffi.
+        self._CHROME_IMPERSONATE, self._CHROME_MAJOR, self._CHROME_FULL_VERSIONS = self._detect_chrome_profile()
+        debug_logger.log_info(f"[FlowClient] curl_cffi impersonate profile: {self._CHROME_IMPERSONATE} (Chrome {self._CHROME_MAJOR})")
 
         # Default "real browser" headers (macOS Chrome Desktop) to reduce upstream 4xx/5xx instability.
         # These will be applied as defaults (won't override caller-provided headers).
