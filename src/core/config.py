@@ -642,6 +642,16 @@ class Config:
             normalized = 60
         self._config["captcha"]["remote_browser_timeout"] = normalized
 
+    @property
+    def warp_auto_reconnect(self) -> bool:
+        """Run warp-cli disconnect/connect when TOO_MUCH_TRAFFIC is hit."""
+        return bool(self._config.get("proxy", {}).get("warp_auto_reconnect", False))
+
+    def set_warp_auto_reconnect(self, enabled: bool):
+        if "proxy" not in self._config:
+            self._config["proxy"] = {}
+        self._config["proxy"]["warp_auto_reconnect"] = bool(enabled)
+
 
 # Global config instance
 config = Config()

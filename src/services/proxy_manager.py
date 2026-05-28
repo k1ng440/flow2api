@@ -1,8 +1,10 @@
 """Proxy management module"""
 from typing import Optional
 import re
+import asyncio
 from ..core.database import Database
 from ..core.models import ProxyConfig
+from ..core.logger import debug_logger
 
 class ProxyManager:
     """Proxy configuration manager"""
@@ -148,3 +150,25 @@ class ProxyManager:
     async def get_proxy_config(self) -> ProxyConfig:
         """Get proxy configuration"""
         return await self.db.get_proxy_config()
+
+    async def reconnect_warp(self, settle_seconds: float = 8.0):
+        """Cycle the WARP connection to obtain a new IP after a TOO_MUCH_TRAFFIC error."""
+        debug_logger.log_warning("[WARP] TOO_MUCH_TRAFFIC — disconnecting WARP...")
+        try:
+            proc = await asyncio.create_subprocess_shell(
+                "warp-cli disconnect",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await proc.communicate()
+            await asyncio.sleep(1)
+            proc = await asyncio.create_subprocess_shell(
+                "warp-cli connect",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await proc.communicate()
+            debug_logger.log_warning(f"[WARP] Reconnected — waiting {settle_seconds}s for new IP...")
+            await asyncio.sleep(settle_seconds)
+        except Exception as e:
+            debug_logger.log_error(f"[WARP] Reconnect failed: {e}")

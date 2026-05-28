@@ -2515,10 +2515,16 @@ class FlowClient:
             )
             return False
 
-        debug_logger.log_warning(
-            f"{log_prefix} hit {retry_reason}, re-acquiring captcha and retrying ({retry_attempt + 2}/{max_retries})..."
-        )
-        await asyncio.sleep(1)
+        if retry_reason == "TOO_MUCH_TRAFFIC rate limit" and config.warp_auto_reconnect and self.proxy_manager:
+            debug_logger.log_warning(
+                f"{log_prefix} hit {retry_reason}, reconnecting WARP before retry ({retry_attempt + 2}/{max_retries})..."
+            )
+            await self.proxy_manager.reconnect_warp()
+        else:
+            debug_logger.log_warning(
+                f"{log_prefix} hit {retry_reason}, re-acquiring captcha and retrying ({retry_attempt + 2}/{max_retries})..."
+            )
+            await asyncio.sleep(1)
         return True
 
     async def _handle_missing_recaptcha_token(
@@ -2548,6 +2554,8 @@ class FlowClient:
             return "429 rate limit"
         if self._is_retryable_network_error(error_str):
             return "network/TLS error"
+        if "too_much_traffic" in error_lower or "too much traffic" in error_lower:
+            return "TOO_MUCH_TRAFFIC rate limit"
         if "recaptcha evaluation failed" in error_lower:
             return "reCAPTCHA evaluation failed"
         if "recaptcha" in error_lower:
