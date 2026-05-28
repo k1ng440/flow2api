@@ -19,7 +19,7 @@
 - 🔄 **AT/ST Auto-refresh** - AT refreshes automatically on expiry; ST refreshes via browser when expired (personal mode)
 - 📊 **Balance Display** - Real-time query and display of VideoFX Credits
 - 🚀 **Load Balancing** - Multi-token round-robin with concurrency control
-- 🌐 **Proxy Support** - HTTP/SOCKS5 proxy support
+- 🌐 **Proxy Support** - HTTP/SOCKS5 proxy with single URL, rotating proxy list file, and WARP auto-reconnect
 - 📱 **Web Admin UI** - Intuitive token and configuration management
 - 🎨 **Continuous image generation conversation**
 - 🧩 **Gemini official request body compatible** - Supports `generateContent` / `streamGenerateContent`, `systemInstruction`, `contents.parts.text/inlineData/fileData`
@@ -115,6 +115,53 @@ After the service starts, visit the admin panel at **http://localhost:8000**. Ch
 
 - **Username**: `admin`
 - **Password**: `admin`
+
+## 🌐 Proxy Configuration
+
+Configure proxies in the admin panel under **Settings → Proxy**.
+
+### Single Proxy URL
+
+Enter one proxy URL directly. Supports HTTP and SOCKS5:
+
+```
+http://user:pass@host:port
+socks5://user:pass@host:port
+host:port:user:pass
+```
+
+### Proxy List File (Rotating)
+
+Point **Proxy List File** to a file containing one proxy per line. A random proxy is selected per request. The file is hot-reloaded every 30 seconds — no restart needed.
+
+```
+# /etc/flow2api/proxies.txt
+# Lines starting with # are ignored
+
+http://user:pass@gate.proxy-cheap.com:31112
+socks5://user:pass@gate.proxy-cheap.com:31113
+gate.proxy-cheap.com:31114:user:pass
+
+# proxybroker2 format also supported:
+<Proxy US 0.18s [HTTP: High] 143.42.66.91:80>
+<Proxy US 0.28s [SOCKS5: Anonymous] 34.44.49.215:1080>
+```
+
+> When a list file is configured it takes priority over the single proxy URL field.
+
+**Important**: Use **sticky session** proxies (same IP for the duration of a request), not purely rotating ones. Both the reCAPTCHA solve and the API submission must reach the same egress IP, or Google will reject the token.
+
+### Capsolver + Proxy (Recommended for API captcha)
+
+When using Capsolver as the captcha method with a proxy configured, Flow2API automatically switches Capsolver to `ReCaptchaV3EnterpriseTask` (proxy-aware) and passes your proxy into the Capsolver task. This ensures Capsolver solves the captcha from the same IP that submits the API request, preventing `UNUSUAL_ACTIVITY_TOO_MUCH_TRAFFIC` reCAPTCHA rejections caused by IP mismatch.
+
+> **Residential or ISP proxies are strongly recommended.** Datacenter IPs (including WARP) receive lower reCAPTCHA trust scores and are more likely to trigger rate limiting.
+
+### WARP Auto-Reconnect
+
+Enable **WARP Auto-Reconnect** to automatically cycle the Cloudflare WARP connection when a `TOO_MUCH_TRAFFIC` rate limit is hit. Requires `warp-cli` installed on the host.
+
+This is a fallback for WARP-based setups. For sustained high volume, a residential proxy list is more reliable.
 
 ## 📈 Monitoring Endpoints
 

@@ -510,6 +510,7 @@ class ProxyConfigRequest(BaseModel):
     media_proxy_enabled: Optional[bool] = None
     media_proxy_url: Optional[str] = None
     warp_auto_reconnect: Optional[bool] = None
+    proxy_list_file: Optional[str] = None
 
 
 class ProxyTestRequest(BaseModel):
@@ -1044,6 +1045,7 @@ async def get_proxy_config(token: str = Depends(verify_admin_token)):
             "media_proxy_enabled": proxy_cfg.media_proxy_enabled,
             "media_proxy_url": proxy_cfg.media_proxy_url,
             "warp_auto_reconnect": config.warp_auto_reconnect,
+            "proxy_list_file": proxy_cfg.proxy_list_file,
         }
     }
 
@@ -1058,6 +1060,7 @@ async def get_proxy_config_alias(token: str = Depends(verify_admin_token)):
         "media_proxy_enabled": proxy_cfg.media_proxy_enabled,
         "media_proxy_url": proxy_cfg.media_proxy_url,
         "warp_auto_reconnect": config.warp_auto_reconnect,
+        "proxy_list_file": proxy_cfg.proxy_list_file,
     }
 
 
@@ -1074,6 +1077,7 @@ async def update_proxy_config_alias(
             media_proxy_enabled=request.media_proxy_enabled,
             media_proxy_url=request.media_proxy_url,
             warp_auto_reconnect=request.warp_auto_reconnect,
+            proxy_list_file=request.proxy_list_file,
         )
     except ValueError as e:
         return {"success": False, "message": str(e)}
@@ -1093,6 +1097,7 @@ async def update_proxy_config(
             media_proxy_enabled=request.media_proxy_enabled,
             media_proxy_url=request.media_proxy_url,
             warp_auto_reconnect=request.warp_auto_reconnect,
+            proxy_list_file=request.proxy_list_file,
         )
     except ValueError as e:
         return {"success": False, "message": str(e)}

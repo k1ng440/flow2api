@@ -455,6 +455,7 @@ class Database:
                     ("media_proxy_enabled", "BOOLEAN DEFAULT 0"),
                     ("media_proxy_url", "TEXT"),
                     ("warp_auto_reconnect", "BOOLEAN DEFAULT 0"),
+                    ("proxy_list_file", "TEXT"),
                 ]
 
                 for col_name, col_type in proxy_columns_to_add:
@@ -1310,6 +1311,7 @@ class Database:
         media_proxy_enabled: Optional[bool] = None,
         media_proxy_url: Optional[str] = None,
         warp_auto_reconnect: Optional[bool] = None,
+        proxy_list_file: Optional[str] = None,
     ):
         """Update proxy configuration"""
         async with self._connect(write=True) as db:
@@ -1334,23 +1336,31 @@ class Database:
                     if warp_auto_reconnect is not None
                     else current.get("warp_auto_reconnect", False)
                 )
+                new_proxy_list_file = (
+                    proxy_list_file
+                    if proxy_list_file is not None
+                    else current.get("proxy_list_file")
+                )
 
                 await db.execute("""
                     UPDATE proxy_config
                     SET enabled = ?, proxy_url = ?,
                         media_proxy_enabled = ?, media_proxy_url = ?,
-                        warp_auto_reconnect = ?,
+                        warp_auto_reconnect = ?, proxy_list_file = ?,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = 1
-                """, (enabled, proxy_url, new_media_proxy_enabled, new_media_proxy_url, new_warp_auto_reconnect))
+                """, (enabled, proxy_url, new_media_proxy_enabled, new_media_proxy_url,
+                      new_warp_auto_reconnect, new_proxy_list_file))
             else:
                 new_media_proxy_enabled = media_proxy_enabled if media_proxy_enabled is not None else False
                 new_media_proxy_url = media_proxy_url
                 new_warp_auto_reconnect = warp_auto_reconnect if warp_auto_reconnect is not None else False
                 await db.execute("""
-                    INSERT INTO proxy_config (id, enabled, proxy_url, media_proxy_enabled, media_proxy_url, warp_auto_reconnect)
-                    VALUES (1, ?, ?, ?, ?, ?)
-                """, (enabled, proxy_url, new_media_proxy_enabled, new_media_proxy_url, new_warp_auto_reconnect))
+                    INSERT INTO proxy_config (id, enabled, proxy_url, media_proxy_enabled, media_proxy_url,
+                                             warp_auto_reconnect, proxy_list_file)
+                    VALUES (1, ?, ?, ?, ?, ?, ?)
+                """, (enabled, proxy_url, new_media_proxy_enabled, new_media_proxy_url,
+                      new_warp_auto_reconnect, proxy_list_file))
 
             await db.commit()
 

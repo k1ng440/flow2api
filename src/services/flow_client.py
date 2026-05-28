@@ -8,7 +8,7 @@ import random
 import base64
 import ssl
 from typing import Dict, Any, Optional, List, Union, Callable, Awaitable
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 import urllib.error
 import urllib.request
 from curl_cffi.requests import AsyncSession
@@ -2661,6 +2661,34 @@ class FlowClient:
         """Generate sceneId: UUID"""
         return str(uuid.uuid4())
 
+    @staticmethod
+    def _proxy_url_to_capsolver_fields(proxy_url: str) -> Optional[Dict[str, Any]]:
+        """Parse proxy URL into capsolver task proxy fields.
+
+        Capsolver requires separate proxyType/proxyAddress/proxyPort fields so it solves
+        the captcha through the same egress IP as the Flow API request, preventing
+        reCAPTCHA token-IP mismatch errors.
+        """
+        try:
+            parsed = urlparse(proxy_url)
+            scheme = (parsed.scheme or "http").lower()
+            host = parsed.hostname
+            port = parsed.port
+            if not host or not port:
+                return None
+            fields: Dict[str, Any] = {
+                "proxyType": scheme,
+                "proxyAddress": host,
+                "proxyPort": port,
+            }
+            if parsed.username:
+                fields["proxyLogin"] = parsed.username
+            if parsed.password:
+                fields["proxyPassword"] = parsed.password
+            return fields
+        except Exception:
+            return None
+
     def _get_remote_browser_service_config(self) -> tuple[str, str, int]:
         base_url = (config.remote_browser_base_url or "").strip().rstrip("/")
         api_key = (config.remote_browser_api_key or "").strip()
@@ -3066,7 +3094,7 @@ class FlowClient:
         elif method == "capsolver":
             client_key = config.capsolver_api_key
             base_url = config.capsolver_base_url
-            task_type = "ReCaptchaV3EnterpriseTaskProxyLess"
+            task_type = "ReCaptchaV3EnterpriseTaskProxyLess"  # overridden below if proxy available
             min_score = None
         else:
             debug_logger.log_error(f"[reCAPTCHA] Unknown API method: {method}")
@@ -3085,6 +3113,7 @@ class FlowClient:
             # Note: curl_cffi uses proxy param for SOCKS5, proxies dict for HTTP
             proxy = None
             proxies = None
+            proxy_url = None
             if self.proxy_manager:
                 try:
                     proxy_url = await self.proxy_manager.get_request_proxy_url()
@@ -3097,6 +3126,15 @@ class FlowClient:
                 except Exception as e:
                     debug_logger.log_warning(f"[reCAPTCHA {method}] Failed to get proxy: {e}")
             
+            # For capsolver: if proxy available, use proxy-aware task type so the token is
+            # solved from the same egress IP as the API request, avoiding reCAPTCHA IP mismatch.
+            capsolver_proxy_fields: Optional[Dict[str, Any]] = None
+            if method == "capsolver" and proxy_url:
+                capsolver_proxy_fields = self._proxy_url_to_capsolver_fields(proxy_url)
+                if capsolver_proxy_fields:
+                    task_type = "ReCaptchaV3EnterpriseTask"
+                    debug_logger.log_info(f"[reCAPTCHA capsolver] Using proxy-aware task type to match egress IP")
+
             async with AsyncSession() as session:
                 create_url = f"{base_url}/createTask"
                 create_data = {
@@ -3110,6 +3148,8 @@ class FlowClient:
                 }
                 if min_score is not None:
                     create_data["task"]["minScore"] = min_score
+                if capsolver_proxy_fields:
+                    create_data["task"].update(capsolver_proxy_fields)
 
                 if proxy:
                     result = await session.post(create_url, json=create_data, impersonate=self._CHROME_IMPERSONATE, proxy=proxy)
