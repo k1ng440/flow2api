@@ -1348,6 +1348,11 @@ class Database:
                     if capsolver_proxy_url is not None
                     else current.get("capsolver_proxy_url")
                 )
+                new_proxy_url = (
+                    proxy_url
+                    if proxy_url is not None
+                    else current.get("proxy_url")
+                )
 
                 await db.execute("""
                     UPDATE proxy_config
@@ -1357,7 +1362,7 @@ class Database:
                         capsolver_proxy_url = ?,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = 1
-                """, (enabled, proxy_url, new_media_proxy_enabled, new_media_proxy_url,
+                """, (enabled, new_proxy_url, new_media_proxy_enabled, new_media_proxy_url,
                       new_warp_auto_reconnect, new_proxy_list_file, new_capsolver_proxy_url))
             else:
                 new_media_proxy_enabled = media_proxy_enabled if media_proxy_enabled is not None else False

@@ -324,6 +324,8 @@ class FlowClient:
                     
                     raise Exception(error_reason)
 
+                if proxy_url and self.proxy_manager:
+                    self.proxy_manager.unflag_proxy(proxy_url)
                 return response.json()
 
         except Exception as e:
@@ -336,7 +338,9 @@ class FlowClient:
                 debug_logger.log_error(f"[API FAILED] Request Body: {json_data}")
                 debug_logger.log_error(f"[API FAILED] Exception: {error_msg}")
 
-            if allow_urllib_fallback and self._should_fallback_to_urllib(error_msg):
+            is_connection_error = self._should_fallback_to_urllib(error_msg)
+
+            if allow_urllib_fallback and is_connection_error:
                 debug_logger.log_warning(
                     f"[HTTP FALLBACK] curl_cffi request failed, falling back to urllib: {method.upper()} {url}"
                 )
@@ -354,10 +358,14 @@ class FlowClient:
                     debug_logger.log_error(
                         f"[HTTP FALLBACK] urllib fallback also failed: {fallback_error}"
                     )
+                    if proxy_url and self.proxy_manager:
+                        self.proxy_manager.flag_proxy(proxy_url)
                     raise Exception(
                         f"Flow API request failed: curl={error_msg}; urllib={fallback_error}"
                     )
 
+            if is_connection_error and proxy_url and self.proxy_manager:
+                self.proxy_manager.flag_proxy(proxy_url)
             raise Exception(f"Flow API request failed: {error_msg}")
 
     def _should_fallback_to_urllib(self, error_message: str) -> bool:
