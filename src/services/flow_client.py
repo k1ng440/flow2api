@@ -1145,6 +1145,7 @@ class FlowClient:
                 attempt_trace["duration_ms"] = int((time.time() - attempt_started_at) * 1000)
                 perf_trace["generation_attempts"].append(attempt_trace)
                 perf_trace["final_success_attempt"] = retry_attempt + 1
+                asyncio.create_task(self._send_capsolver_feedback(True))
                 return result, session_id, perf_trace
             except Exception as e:
                 last_error = e
@@ -1248,6 +1249,7 @@ class FlowClient:
                 )
 
                 # Return base64-encoded image
+                asyncio.create_task(self._send_capsolver_feedback(True))
                 return result.get("encodedImage", "")
             except Exception as e:
                 last_error = e
@@ -1602,6 +1604,7 @@ class FlowClient:
                     at=at,
                     timeout=self._get_video_submit_timeout()
                 )
+                asyncio.create_task(self._send_capsolver_feedback(True))
                 return self._normalize_video_generation_response(result, fallback_project_id=project_id)
             except Exception as e:
                 last_error = e
@@ -1730,6 +1733,7 @@ class FlowClient:
                     at=at,
                     timeout=self._get_video_submit_timeout()
                 )
+                asyncio.create_task(self._send_capsolver_feedback(True))
                 return self._normalize_video_generation_response(result, fallback_project_id=project_id)
             except Exception as e:
                 last_error = e
@@ -1861,6 +1865,7 @@ class FlowClient:
                     at=at,
                     timeout=self._get_video_submit_timeout()
                 )
+                asyncio.create_task(self._send_capsolver_feedback(True))
                 return self._normalize_video_generation_response(result, fallback_project_id=project_id)
             except Exception as e:
                 last_error = e
@@ -1988,6 +1993,7 @@ class FlowClient:
                     at=at,
                     timeout=self._get_video_submit_timeout()
                 )
+                asyncio.create_task(self._send_capsolver_feedback(True))
                 return self._normalize_video_generation_response(result, fallback_project_id=project_id)
             except Exception as e:
                 last_error = e
@@ -2121,6 +2127,7 @@ class FlowClient:
                     at=at,
                     timeout=self._get_video_submit_timeout()
                 )
+                asyncio.create_task(self._send_capsolver_feedback(True))
                 return self._normalize_video_generation_response(result, fallback_project_id=project_id)
             except Exception as e:
                 last_error = e
@@ -2386,6 +2393,7 @@ class FlowClient:
                     at=at,
                     timeout=self._get_video_submit_timeout()
                 )
+                asyncio.create_task(self._send_capsolver_feedback(True))
                 return self._normalize_video_generation_response(result, fallback_project_id=project_id)
             except Exception as e:
                 last_error = e
@@ -2440,6 +2448,7 @@ class FlowClient:
                     at=at,
                     timeout=self._get_video_poll_timeout()
                 )
+                asyncio.create_task(self._send_capsolver_feedback(True))
                 return self._normalize_video_generation_response(result)
             except Exception as e:
                 if media_refs:
@@ -2450,6 +2459,7 @@ class FlowClient:
                             at=at,
                             timeout=self._get_video_poll_timeout()
                         )
+                        asyncio.create_task(self._send_capsolver_feedback(True))
                         return self._normalize_video_generation_response(result)
                     except Exception:
                         pass
@@ -2528,6 +2538,10 @@ class FlowClient:
             fingerprint = self._request_fingerprint_ctx.get()
             if isinstance(fingerprint, dict) and fingerprint.get("proxy_url"):
                 self.proxy_manager.flag_proxy(fingerprint["proxy_url"])
+
+        # Tell capsolver the token was rejected so they can refund and improve quality
+        if retry_reason in ("TOO_MUCH_TRAFFIC rate limit", "reCAPTCHA evaluation failed"):
+            asyncio.create_task(self._send_capsolver_feedback(False))
 
         if retry_reason == "TOO_MUCH_TRAFFIC rate limit" and config.warp_auto_reconnect and self.proxy_manager:
             debug_logger.log_warning(
@@ -2703,6 +2717,31 @@ class FlowClient:
             return fields
         except Exception:
             return None
+
+    async def _send_capsolver_feedback(self, solved: bool) -> None:
+        """Report whether a capsolver reCAPTCHA token was accepted by the target site."""
+        fingerprint = self._request_fingerprint_ctx.get()
+        if not isinstance(fingerprint, dict):
+            return
+        ctx = fingerprint.get("capsolver_feedback")
+        if not ctx:
+            return
+        try:
+            payload = {
+                "clientKey": ctx["clientKey"],
+                "solved": solved,
+                "task": ctx["task"],
+                "result": ctx["result"],
+            }
+            async with AsyncSession(trust_env=False) as session:
+                r = await session.post(
+                    f"{ctx['base_url']}/feedbackTask",
+                    json=payload,
+                    timeout=10,
+                )
+            debug_logger.log_info(f"[capsolver] feedbackTask: solved={solved} status={r.status_code}")
+        except Exception as e:
+            debug_logger.log_warning(f"[capsolver] feedbackTask failed: {e}")
 
     def _get_remote_browser_service_config(self) -> tuple[str, str, int]:
         base_url = (config.remote_browser_base_url or "").strip().rstrip("/")
@@ -3204,6 +3243,19 @@ class FlowClient:
                         response = solution.get('gRecaptchaResponse')
                         if response:
                             debug_logger.log_info(f"[reCAPTCHA {method}] Token acquired successfully")
+                            if method == "capsolver":
+                                fp = self._request_fingerprint_ctx.get()
+                                if isinstance(fp, dict):
+                                    fp["capsolver_feedback"] = {
+                                        "clientKey": client_key,
+                                        "base_url": base_url,
+                                        "task": create_data["task"],
+                                        "result": {
+                                            "errorId": result_json.get("errorId", 0),
+                                            "taskId": task_id,
+                                            "status": "ready",
+                                        },
+                                    }
                             return response
 
                     await asyncio.sleep(3)
