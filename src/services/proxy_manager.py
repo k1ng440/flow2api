@@ -11,6 +11,7 @@ class ProxyManager:
 
     def __init__(self, db: Database):
         self.db = db
+        self._warp_reconnect_lock = asyncio.Lock()
 
     def _parse_proxy_line(self, line: str) -> Optional[str]:
         """Convert user proxy input to standard URL format.
@@ -157,32 +158,42 @@ class ProxyManager:
         return await self.db.get_proxy_config()
 
     async def reconnect_warp(self, settle_seconds: float = 8.0):
-        """Cycle the WARP connection to obtain a new IP after a TOO_MUCH_TRAFFIC error."""
-        debug_logger.log_warning("[WARP] TOO_MUCH_TRAFFIC — disconnecting WARP...")
-        try:
-            proc = await asyncio.create_subprocess_shell(
-                "warp-cli disconnect",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await proc.communicate()
-            if proc.returncode == 127:
-                debug_logger.log_error("[WARP] warp-cli not found — install Cloudflare WARP or disable warp_auto_reconnect")
-                return
-            if proc.returncode != 0:
-                debug_logger.log_error(f"[WARP] disconnect failed (exit {proc.returncode}): {stderr.decode().strip()}")
+        """Cycle the WARP connection to obtain a new IP after a TOO_MUCH_TRAFFIC error.
 
-            await asyncio.sleep(1)
-            proc = await asyncio.create_subprocess_shell(
-                "warp-cli connect",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await proc.communicate()
-            if proc.returncode != 0:
-                debug_logger.log_error(f"[WARP] connect failed (exit {proc.returncode}): {stderr.decode().strip()}")
-                return
-            debug_logger.log_warning(f"[WARP] Reconnected — waiting {settle_seconds}s for new IP...")
-            await asyncio.sleep(settle_seconds)
-        except Exception as e:
-            debug_logger.log_error(f"[WARP] Reconnect failed: {e}")
+        Serialized via lock — concurrent callers wait for the in-progress reconnect
+        to finish rather than stacking multiple disconnect/connect cycles.
+        """
+        if self._warp_reconnect_lock.locked():
+            debug_logger.log_warning("[WARP] Reconnect already in progress — waiting for it to finish...")
+            async with self._warp_reconnect_lock:
+                return  # reconnect done by the holder; just proceed
+
+        async with self._warp_reconnect_lock:
+            debug_logger.log_warning("[WARP] TOO_MUCH_TRAFFIC — disconnecting WARP...")
+            try:
+                proc = await asyncio.create_subprocess_shell(
+                    "warp-cli disconnect",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await proc.communicate()
+                if proc.returncode == 127:
+                    debug_logger.log_error("[WARP] warp-cli not found — install Cloudflare WARP or disable warp_auto_reconnect")
+                    return
+                if proc.returncode != 0:
+                    debug_logger.log_error(f"[WARP] disconnect failed (exit {proc.returncode}): {stderr.decode().strip()}")
+
+                await asyncio.sleep(1)
+                proc = await asyncio.create_subprocess_shell(
+                    "warp-cli connect",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await proc.communicate()
+                if proc.returncode != 0:
+                    debug_logger.log_error(f"[WARP] connect failed (exit {proc.returncode}): {stderr.decode().strip()}")
+                    return
+                debug_logger.log_warning(f"[WARP] Reconnected — waiting {settle_seconds}s for new IP...")
+                await asyncio.sleep(settle_seconds)
+            except Exception as e:
+                debug_logger.log_error(f"[WARP] Reconnect failed: {e}")
