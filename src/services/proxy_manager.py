@@ -1,8 +1,7 @@
 """Proxy management module"""
-from typing import Optional, List, Tuple
+from typing import Optional, List
 import re
 import asyncio
-import hashlib
 import time
 import random
 from ..core.database import Database
@@ -21,6 +20,8 @@ class ProxyManager:
         self._PROXY_LIST_CACHE_TTL = 30.0  # seconds
         # {proxy_url: {"fail_count": int, "cooldown_until": float}}
         self._proxy_flags: dict = {}
+        # {sticky_key: proxy_url} — persists until assigned proxy is flagged or removed
+        self._sticky_assignments: dict = {}
 
     def _parse_proxy_line(self, line: str) -> Optional[str]:
         """Convert user proxy input to standard URL format.
@@ -163,11 +164,17 @@ class ProxyManager:
             # Drop flags for URLs no longer in the list so the flags dict doesn't grow unboundedly
             if new_list != self._proxy_list_cache:
                 active = set(new_list)
-                stale = [url for url in self._proxy_flags if url not in active]
-                for url in stale:
+                stale_flags = [url for url in self._proxy_flags if url not in active]
+                for url in stale_flags:
                     del self._proxy_flags[url]
-                if stale:
-                    debug_logger.log_info(f"[ProxyManager] Cleared {len(stale)} stale proxy flags after reload")
+                stale_sticky = [k for k, v in self._sticky_assignments.items() if v not in active]
+                for k in stale_sticky:
+                    del self._sticky_assignments[k]
+                if stale_flags or stale_sticky:
+                    debug_logger.log_info(
+                        f"[ProxyManager] Cleared {len(stale_flags)} stale flags, "
+                        f"{len(stale_sticky)} stale assignments after reload"
+                    )
             self._proxy_list_cache = new_list
             self._proxy_list_file_cached = file_path
             self._proxy_list_cache_time = now
@@ -176,20 +183,19 @@ class ProxyManager:
             )
         return self._proxy_list_cache
 
-    def flag_proxy(self, proxy_url: str, cooldown_seconds: float = 600) -> None:
-        """Mark a proxy as rate-limited/blocked for cooldown_seconds.
+    _COOLDOWN_SCHEDULE = [600, 1800, 7200, 86400]  # 10m, 30m, 2h, 24h
 
-        Called when a request through this proxy hits TOO_MUCH_TRAFFIC or
-        reCAPTCHA evaluation failure, so future picks avoid it temporarily.
-        """
+    def flag_proxy(self, proxy_url: str) -> None:
+        """Mark a proxy as failed, applying escalating cooldowns on repeated failures."""
         now = time.monotonic()
         entry = self._proxy_flags.get(proxy_url, {"fail_count": 0})
-        entry["fail_count"] = entry["fail_count"] + 1
-        entry["cooldown_until"] = now + cooldown_seconds
+        fail = entry["fail_count"] + 1
+        cooldown = self._COOLDOWN_SCHEDULE[min(fail - 1, len(self._COOLDOWN_SCHEDULE) - 1)]
+        entry["fail_count"] = fail
+        entry["cooldown_until"] = now + cooldown
         self._proxy_flags[proxy_url] = entry
         debug_logger.log_warning(
-            f"[ProxyManager] Flagged proxy for {cooldown_seconds}s "
-            f"(fail #{entry['fail_count']}): {proxy_url}"
+            f"[ProxyManager] Flagged proxy (fail #{fail}, cooldown {cooldown}s): {proxy_url}"
         )
 
     def unflag_proxy(self, proxy_url: str) -> None:
@@ -197,9 +203,10 @@ class ProxyManager:
         self._proxy_flags.pop(proxy_url, None)
 
     def unflag_all(self) -> None:
-        """Clear all proxy flags (e.g. after WARP reconnect changes egress IP)."""
+        """Clear all proxy flags and sticky assignments (WARP reconnect changes egress IP)."""
         self._proxy_flags.clear()
-        debug_logger.log_info("[ProxyManager] Cleared all proxy flags")
+        self._sticky_assignments.clear()
+        debug_logger.log_info("[ProxyManager] Cleared all proxy flags and sticky assignments")
 
     def _is_proxy_flagged(self, proxy_url: str) -> bool:
         entry = self._proxy_flags.get(proxy_url)
@@ -210,21 +217,33 @@ class ProxyManager:
     def _pick_proxy(self, proxies: List[str], sticky_key: Optional[str] = None) -> Optional[str]:
         """Pick a proxy from the list.
 
-        When sticky_key is given, deterministically maps the key to a proxy so the
-        same account always uses the same egress IP (avoids per-request IP hopping).
+        When sticky_key is given, remembers the assigned proxy and reuses it until
+        it becomes flagged or disappears from the list — avoids per-request IP hopping.
         Falls back to the least-recently-flagged proxy when all are on cooldown.
         """
+        proxy_set = set(proxies)
         available = [p for p in proxies if not self._is_proxy_flagged(p)]
-        if available:
-            if sticky_key:
-                idx = int(hashlib.md5(sticky_key.encode()).hexdigest()[:8], 16) % len(available)
-                return available[idx]
+
+        if sticky_key:
+            assigned = self._sticky_assignments.get(sticky_key)
+            if assigned and assigned in proxy_set and not self._is_proxy_flagged(assigned):
+                return assigned
+            # Assigned proxy gone or flagged — pick new one and remember it
+            if available:
+                new = random.choice(available)
+                self._sticky_assignments[sticky_key] = new
+                return new
+        elif available:
             return random.choice(available)
+
         if proxies:
             debug_logger.log_warning(
                 f"[ProxyManager] All {len(proxies)} proxies flagged — using least-recently-flagged"
             )
-            return min(proxies, key=lambda p: self._proxy_flags.get(p, {}).get("cooldown_until", 0))
+            least_stale = min(proxies, key=lambda p: self._proxy_flags.get(p, {}).get("cooldown_until", 0))
+            if sticky_key:
+                self._sticky_assignments[sticky_key] = least_stale
+            return least_stale
         return None
 
     async def get_proxy_url(self) -> Optional[str]:

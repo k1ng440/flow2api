@@ -4,6 +4,7 @@ import base64
 import json
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import Optional, AsyncGenerator, List, Dict, Any
 from ..core.logger import debug_logger
 from ..core.config import config
@@ -929,6 +930,7 @@ class GenerationHandler:
         self.load_balancer = load_balancer
         self.db = db
         self.concurrency_manager = concurrency_manager
+        self.proxy_manager = proxy_manager
         self.file_cache = FileCache(
             cache_dir=str(cache_dir),
             default_timeout=config.cache_timeout,
@@ -1450,6 +1452,16 @@ class GenerationHandler:
 
             # Call generation API
             if stream:
+                if self.proxy_manager:
+                    _proxy = await self.proxy_manager.get_request_proxy_url(
+                        sticky_key=token.at[:16] if token.at else None
+                    )
+                    if _proxy:
+                        _p = urlparse(_proxy)
+                        _proxy_display = f"{_p.scheme}://{_p.hostname}:{_p.port}"
+                    else:
+                        _proxy_display = "none (direct)"
+                    yield self._create_stream_chunk(f"Proxy: {_proxy_display}\n")
                 if images and len(images) > 0:
                     yield self._create_stream_chunk("Reference images uploaded, performing captcha verification...\n")
                 else:
