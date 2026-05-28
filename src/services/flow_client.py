@@ -1072,7 +1072,8 @@ class FlowClient:
                 recaptcha_token, browser_id = await self._get_recaptcha_token(
                     project_id,
                     action="IMAGE_GENERATION",
-                    token_id=token_id
+                    token_id=token_id,
+                    sticky_key=at[:16] if at else None,
                 )
             finally:
                 if launch_gate_acquired:
@@ -1203,7 +1204,8 @@ class FlowClient:
             recaptcha_token, browser_id = await self._get_recaptcha_token(
                 project_id,
                 action="IMAGE_GENERATION",
-                token_id=token_id
+                token_id=token_id,
+                sticky_key=at[:16] if at else None,
             )
             if not recaptcha_token:
                 last_error = Exception("Failed to obtain reCAPTCHA token")
@@ -1546,7 +1548,8 @@ class FlowClient:
                 recaptcha_token, browser_id = await self._get_recaptcha_token(
                     project_id,
                     action="VIDEO_GENERATION",
-                    token_id=token_id
+                    token_id=token_id,
+                    sticky_key=at[:16] if at else None,
                 )
             finally:
                 if launch_gate_acquired:
@@ -1667,7 +1670,8 @@ class FlowClient:
                 recaptcha_token, browser_id = await self._get_recaptcha_token(
                     project_id,
                     action="VIDEO_GENERATION",
-                    token_id=token_id
+                    token_id=token_id,
+                    sticky_key=at[:16] if at else None,
                 )
             finally:
                 if launch_gate_acquired:
@@ -1797,7 +1801,8 @@ class FlowClient:
                 recaptcha_token, browser_id = await self._get_recaptcha_token(
                     project_id,
                     action="VIDEO_GENERATION",
-                    token_id=token_id
+                    token_id=token_id,
+                    sticky_key=at[:16] if at else None,
                 )
             finally:
                 if launch_gate_acquired:
@@ -1925,7 +1930,8 @@ class FlowClient:
                 recaptcha_token, browser_id = await self._get_recaptcha_token(
                     project_id,
                     action="VIDEO_GENERATION",
-                    token_id=token_id
+                    token_id=token_id,
+                    sticky_key=at[:16] if at else None,
                 )
             finally:
                 if launch_gate_acquired:
@@ -2051,7 +2057,8 @@ class FlowClient:
                 recaptcha_token, browser_id = await self._get_recaptcha_token(
                     project_id,
                     action="VIDEO_GENERATION",
-                    token_id=token_id
+                    token_id=token_id,
+                    sticky_key=at[:16] if at else None,
                 )
             finally:
                 if launch_gate_acquired:
@@ -2327,7 +2334,8 @@ class FlowClient:
                 recaptcha_token, browser_id = await self._get_recaptcha_token(
                     project_id,
                     action="VIDEO_GENERATION",
-                    token_id=token_id
+                    token_id=token_id,
+                    sticky_key=at[:16] if at else None,
                 )
             finally:
                 if launch_gate_acquired:
@@ -2928,7 +2936,8 @@ class FlowClient:
         self,
         project_id: str,
         action: str = "IMAGE_GENERATION",
-        token_id: Optional[int] = None
+        token_id: Optional[int] = None,
+        sticky_key: Optional[str] = None,
     ) -> tuple[Optional[str], Optional[Union[int, str]]]:
         """Get reCAPTCHA token - supports multiple captcha methods.
 
@@ -3060,21 +3069,21 @@ class FlowClient:
             proxy_url = None
             if self.proxy_manager:
                 try:
-                    proxy_url = await self.proxy_manager.get_request_proxy_url()
+                    proxy_url = await self.proxy_manager.get_request_proxy_url(sticky_key=sticky_key)
                 except Exception as e:
                     debug_logger.log_warning(f"[reCAPTCHA] Failed to get proxy for API captcha: {e}")
             fingerprint_ctx: Dict[str, Any] = {"user_agent": api_captcha_ua}
             if proxy_url:
                 fingerprint_ctx["proxy_url"] = proxy_url
             self._set_request_fingerprint(fingerprint_ctx)
-            token = await self._get_api_captcha_token(captcha_method, project_id, action)
+            token = await self._get_api_captcha_token(captcha_method, project_id, action, sticky_key=sticky_key)
             return token, None
         else:
             debug_logger.log_info(f"[reCAPTCHA] Unknown captcha method: {captcha_method}")
             self._set_request_fingerprint(None)
             return None, None
 
-    async def _get_api_captcha_token(self, method: str, project_id: str, action: str = "IMAGE_GENERATION") -> Optional[str]:
+    async def _get_api_captcha_token(self, method: str, project_id: str, action: str = "IMAGE_GENERATION", sticky_key: Optional[str] = None) -> Optional[str]:
         """Generic API captcha service.
 
         Args:
@@ -3123,7 +3132,7 @@ class FlowClient:
             proxy_url = None
             if self.proxy_manager:
                 try:
-                    proxy_url = await self.proxy_manager.get_request_proxy_url()
+                    proxy_url = await self.proxy_manager.get_request_proxy_url(sticky_key=sticky_key)
                     if proxy_url:
                         if proxy_url.startswith("socks5://"):
                             # Use different param depending on proxy type
