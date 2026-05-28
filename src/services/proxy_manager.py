@@ -301,10 +301,12 @@ class ProxyManager:
         # Bust cache so new file path is picked up immediately
         self._proxy_list_file_cached = None
 
-    async def get_capsolver_proxy_url(self) -> Optional[str]:
-        """Return the dedicated capsolver proxy URL, or None if not configured."""
+    async def get_capsolver_proxy_url(self, sticky_key: Optional[str] = None) -> Optional[str]:
+        """Return capsolver proxy URL, falling back to general request proxy if not set."""
         cfg = await self.db.get_proxy_config()
-        return cfg.capsolver_proxy_url if cfg else None
+        if cfg and cfg.capsolver_proxy_url:
+            return cfg.capsolver_proxy_url
+        return await self.get_request_proxy_url(sticky_key=sticky_key)
 
     async def get_proxy_config(self) -> ProxyConfig:
         """Get proxy configuration"""

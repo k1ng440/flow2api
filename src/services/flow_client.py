@@ -3170,14 +3170,10 @@ class FlowClient:
             proxy_url = None
             if self.proxy_manager:
                 try:
-                    proxy_url = await self.proxy_manager.get_request_proxy_url(sticky_key=sticky_key)
                     if method == "capsolver":
-                        # capsolver_proxy_url overrides the general proxy for task fields,
-                        # allowing flow2api to use WARP directly while capsolver uses a
-                        # dedicated tunnel endpoint for IP alignment.
-                        capsolver_specific = await self.proxy_manager.get_capsolver_proxy_url()
-                        if capsolver_specific:
-                            proxy_url = capsolver_specific
+                        proxy_url = await self.proxy_manager.get_capsolver_proxy_url(sticky_key=sticky_key)
+                    else:
+                        proxy_url = await self.proxy_manager.get_request_proxy_url(sticky_key=sticky_key)
                 except Exception as e:
                     debug_logger.log_warning(f"[reCAPTCHA {method}] Failed to get proxy: {e}")
 
