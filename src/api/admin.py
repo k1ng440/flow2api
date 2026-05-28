@@ -1072,10 +1072,9 @@ async def update_proxy_config_alias(
             enabled=request.proxy_enabled,
             proxy_url=request.proxy_url,
             media_proxy_enabled=request.media_proxy_enabled,
-            media_proxy_url=request.media_proxy_url
+            media_proxy_url=request.media_proxy_url,
+            warp_auto_reconnect=request.warp_auto_reconnect,
         )
-        if request.warp_auto_reconnect is not None:
-            config.set_warp_auto_reconnect(request.warp_auto_reconnect)
     except ValueError as e:
         return {"success": False, "message": str(e)}
     return {"success": True, "message": "Proxy config updated successfully"}
@@ -1092,10 +1091,9 @@ async def update_proxy_config(
             enabled=request.proxy_enabled,
             proxy_url=request.proxy_url,
             media_proxy_enabled=request.media_proxy_enabled,
-            media_proxy_url=request.media_proxy_url
+            media_proxy_url=request.media_proxy_url,
+            warp_auto_reconnect=request.warp_auto_reconnect,
         )
-        if request.warp_auto_reconnect is not None:
-            config.set_warp_auto_reconnect(request.warp_auto_reconnect)
     except ValueError as e:
         return {"success": False, "message": str(e)}
     return {"success": True, "message": "Proxy config updated successfully"}

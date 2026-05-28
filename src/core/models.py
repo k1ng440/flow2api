@@ -131,6 +131,7 @@ class ProxyConfig(BaseModel):
     proxy_url: Optional[str] = None  # Request proxy address
     media_proxy_enabled: bool = False  # Image upload/download proxy toggle
     media_proxy_url: Optional[str] = None  # Image upload/download proxy address
+    warp_auto_reconnect: bool = False  # Run warp-cli reconnect on TOO_MUCH_TRAFFIC
 
 
 class GenerationConfig(BaseModel):

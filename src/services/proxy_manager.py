@@ -134,9 +134,11 @@ class ProxyManager:
         enabled: bool,
         proxy_url: Optional[str],
         media_proxy_enabled: Optional[bool] = None,
-        media_proxy_url: Optional[str] = None
+        media_proxy_url: Optional[str] = None,
+        warp_auto_reconnect: Optional[bool] = None,
     ):
         """Update proxy configuration"""
+        from ..core.config import config
         normalized_proxy_url = self.normalize_proxy_url(proxy_url)
         normalized_media_proxy_url = self.normalize_proxy_url(media_proxy_url)
 
@@ -144,8 +146,11 @@ class ProxyManager:
             enabled=enabled,
             proxy_url=normalized_proxy_url,
             media_proxy_enabled=media_proxy_enabled,
-            media_proxy_url=normalized_media_proxy_url
+            media_proxy_url=normalized_media_proxy_url,
+            warp_auto_reconnect=warp_auto_reconnect,
         )
+        if warp_auto_reconnect is not None:
+            config.set_warp_auto_reconnect(warp_auto_reconnect)
 
     async def get_proxy_config(self) -> ProxyConfig:
         """Get proxy configuration"""
