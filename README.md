@@ -149,6 +149,46 @@ gate.proxy-cheap.com:31114:user:pass
 
 > When a list file is configured it takes priority over the single proxy URL field.
 
+#### Automatic Proxy Harvesting (`scripts/proxy_harvest.py`)
+
+A self-contained harvester that finds high-anonymity proxies via [proxybroker2](https://github.com/bluet/proxybroker2), checks their reputation against ProxyCheck.io (blocks TOR exits, caches results 7 days), and validates each one by actually fetching Google Flow through it. Only proxies that pass all checks are written to the output file.
+
+**Dependencies** (on the proxy host):
+```bash
+pip3 install proxybroker2 aiohttp
+```
+
+**Run manually:**
+```bash
+python3 scripts/proxy_harvest.py --limit 60 --output /opt/flow2api/data/proxies.txt
+```
+
+**Env vars:**
+```
+PROXYCHECK_KEY   ProxyCheck.io API key — raises daily limit from 100 to 1000 req/day
+```
+
+**Run automatically via systemd** (hourly timer, single-instance locked):
+```ini
+# /etc/systemd/system/proxybroker-find.service
+[Unit]
+Description=Proxy harvest + Google Flow validation
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/flow2api/scripts/proxy_harvest.py
+TimeoutStartSec=600
+
+# /etc/systemd/system/proxybroker-find.timer
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1h
+Persistent=true
+```
+
+Then set **Proxy List File** to `/opt/flow2api/data/proxies.txt` in the admin panel.
+
 **Important**: Use **sticky session** proxies (same IP for the duration of a request), not purely rotating ones. Both the reCAPTCHA solve and the API submission must reach the same egress IP, or Google will reject the token.
 
 ### Capsolver + Proxy (Recommended for API captcha)
