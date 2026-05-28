@@ -514,7 +514,7 @@ class ProxyConfigRequest(BaseModel):
 
 
 class ProxyTestRequest(BaseModel):
-    proxy_url: str
+    proxy_url: Optional[str] = None
     test_url: Optional[str] = "https://labs.google/"
     timeout_seconds: Optional[int] = 15
 
@@ -1104,6 +1104,30 @@ async def update_proxy_config(
     return {"success": True, "message": "Proxy config updated successfully"}
 
 
+@router.get("/api/proxy/flags")
+async def get_proxy_flags(token: str = Depends(verify_admin_token)):
+    """Get current proxy flag status (which proxies are in cooldown)."""
+    now = time.monotonic()
+    flags = []
+    for url, entry in proxy_manager._proxy_flags.items():
+        cooldown_until = entry.get("cooldown_until", 0)
+        remaining = max(0.0, cooldown_until - now)
+        flags.append({
+            "proxy_url": url,
+            "fail_count": entry.get("fail_count", 0),
+            "flagged": remaining > 0,
+            "cooldown_remaining_seconds": round(remaining),
+        })
+    return {"flags": flags}
+
+
+@router.post("/api/proxy/flags/clear")
+async def clear_proxy_flags(token: str = Depends(verify_admin_token)):
+    """Clear all proxy flags, immediately making all proxies eligible again."""
+    proxy_manager.unflag_all()
+    return {"success": True, "message": "All proxy flags cleared"}
+
+
 @router.post("/api/proxy/test")
 async def test_proxy_connectivity(
     request: ProxyTestRequest,
@@ -1116,20 +1140,23 @@ async def test_proxy_connectivity(
     timeout_seconds = max(5, min(timeout_seconds, 60))
 
     if not proxy_input:
-        return {
-            "success": False,
-            "message": "Proxy URL is empty",
-            "test_url": test_url
-        }
-
-    try:
-        proxy_url = proxy_manager.normalize_proxy_url(proxy_input)
-    except ValueError as e:
-        return {
-            "success": False,
-            "message": str(e),
-            "test_url": test_url
-        }
+        resolved = await proxy_manager.get_request_proxy_url()
+        if not resolved:
+            return {
+                "success": False,
+                "message": "No proxy configured",
+                "test_url": test_url
+            }
+        proxy_url = resolved
+    else:
+        try:
+            proxy_url = proxy_manager.normalize_proxy_url(proxy_input)
+        except ValueError as e:
+            return {
+                "success": False,
+                "message": str(e),
+                "test_url": test_url
+            }
 
     start_time = time.time()
     try:

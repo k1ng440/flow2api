@@ -169,13 +169,20 @@ class FlowClient:
         """
         fingerprint = self._request_fingerprint_ctx.get()
 
+        # Derive account identifier before proxy resolution so sticky selection works
+        account_id = None
+        if st_token:
+            account_id = st_token[:16]
+        elif at_token:
+            account_id = at_token[:16]
+
         proxy_url = None
         if not force_no_proxy:
             if self.proxy_manager:
                 if use_media_proxy and hasattr(self.proxy_manager, "get_media_proxy_url"):
-                    proxy_url = await self.proxy_manager.get_media_proxy_url()
+                    proxy_url = await self.proxy_manager.get_media_proxy_url(sticky_key=account_id)
                 elif hasattr(self.proxy_manager, "get_request_proxy_url"):
-                    proxy_url = await self.proxy_manager.get_request_proxy_url()
+                    proxy_url = await self.proxy_manager.get_request_proxy_url(sticky_key=account_id)
                 else:
                     proxy_url = await self.proxy_manager.get_proxy_url()
 
@@ -197,13 +204,6 @@ class FlowClient:
         # AT auth - use Bearer
         if use_at and at_token:
             headers["authorization"] = f"Bearer {at_token}"
-
-        # Determine account identifier (prefer first 16 chars of token)
-        account_id = None
-        if st_token:
-            account_id = st_token[:16]
-        elif at_token:
-            account_id = at_token[:16]
 
         # Common headers - prefer UA from captcha browser fingerprint
         fingerprint_user_agent = None
@@ -2515,11 +2515,18 @@ class FlowClient:
             )
             return False
 
+        # Flag the proxy that caused the error so future picks avoid it
+        if retry_reason in ("TOO_MUCH_TRAFFIC rate limit", "reCAPTCHA evaluation failed") and self.proxy_manager:
+            fingerprint = self._request_fingerprint_ctx.get()
+            if isinstance(fingerprint, dict) and fingerprint.get("proxy_url"):
+                self.proxy_manager.flag_proxy(fingerprint["proxy_url"])
+
         if retry_reason == "TOO_MUCH_TRAFFIC rate limit" and config.warp_auto_reconnect and self.proxy_manager:
             debug_logger.log_warning(
                 f"{log_prefix} hit {retry_reason}, reconnecting WARP before retry ({retry_attempt + 2}/{max_retries})..."
             )
             await self.proxy_manager.reconnect_warp()
+            self.proxy_manager.unflag_all()
         else:
             debug_logger.log_warning(
                 f"{log_prefix} hit {retry_reason}, re-acquiring captcha and retrying ({retry_attempt + 2}/{max_retries})..."
