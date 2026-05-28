@@ -159,7 +159,16 @@ class ProxyManager:
             file_path != self._proxy_list_file_cached
             or now - self._proxy_list_cache_time > self._PROXY_LIST_CACHE_TTL
         ):
-            self._proxy_list_cache = self._load_proxy_list_file(file_path)
+            new_list = self._load_proxy_list_file(file_path)
+            # Drop flags for URLs no longer in the list so the flags dict doesn't grow unboundedly
+            if new_list != self._proxy_list_cache:
+                active = set(new_list)
+                stale = [url for url in self._proxy_flags if url not in active]
+                for url in stale:
+                    del self._proxy_flags[url]
+                if stale:
+                    debug_logger.log_info(f"[ProxyManager] Cleared {len(stale)} stale proxy flags after reload")
+            self._proxy_list_cache = new_list
             self._proxy_list_file_cached = file_path
             self._proxy_list_cache_time = now
             debug_logger.log_info(
