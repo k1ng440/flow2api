@@ -133,6 +133,7 @@ class ProxyConfig(BaseModel):
     media_proxy_url: Optional[str] = None  # Image upload/download proxy address
     warp_auto_reconnect: bool = False  # Run warp-cli reconnect on TOO_MUCH_TRAFFIC
     proxy_list_file: Optional[str] = None  # Path to newline-separated proxy list file
+    capsolver_proxy_url: Optional[str] = None  # Proxy for capsolver task fields only (overrides request proxy for IP alignment)
 
 
 class GenerationConfig(BaseModel):

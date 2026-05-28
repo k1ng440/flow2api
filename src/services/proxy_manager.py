@@ -259,11 +259,13 @@ class ProxyManager:
         media_proxy_url: Optional[str] = None,
         warp_auto_reconnect: Optional[bool] = None,
         proxy_list_file: Optional[str] = None,
+        capsolver_proxy_url: Optional[str] = None,
     ):
         """Update proxy configuration"""
         from ..core.config import config
         normalized_proxy_url = self.normalize_proxy_url(proxy_url)
         normalized_media_proxy_url = self.normalize_proxy_url(media_proxy_url)
+        normalized_capsolver_proxy_url = self.normalize_proxy_url(capsolver_proxy_url)
         normalized_list_file = proxy_list_file.strip() if proxy_list_file else None
 
         await self.db.update_proxy_config(
@@ -273,11 +275,17 @@ class ProxyManager:
             media_proxy_url=normalized_media_proxy_url,
             warp_auto_reconnect=warp_auto_reconnect,
             proxy_list_file=normalized_list_file or None,
+            capsolver_proxy_url=normalized_capsolver_proxy_url,
         )
         if warp_auto_reconnect is not None:
             config.set_warp_auto_reconnect(warp_auto_reconnect)
         # Bust cache so new file path is picked up immediately
         self._proxy_list_file_cached = None
+
+    async def get_capsolver_proxy_url(self) -> Optional[str]:
+        """Return the dedicated capsolver proxy URL, or None if not configured."""
+        cfg = await self.db.get_proxy_config()
+        return cfg.capsolver_proxy_url if cfg else None
 
     async def get_proxy_config(self) -> ProxyConfig:
         """Get proxy configuration"""
