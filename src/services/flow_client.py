@@ -3164,25 +3164,28 @@ class FlowClient:
         page_action = action
 
         try:
-            # Get proxy config to also route captcha API requests through proxy
-            # Note: curl_cffi uses proxy param for SOCKS5, proxies dict for HTTP
-            proxy = None
-            proxies = None
+            # Resolve proxy URL for capsolver task fields (IP alignment).
+            # capsolver API HTTP calls go direct — routing them through the proxy
+            # causes timeouts when the proxy is unavailable.
             proxy_url = None
             if self.proxy_manager:
                 try:
                     proxy_url = await self.proxy_manager.get_request_proxy_url(sticky_key=sticky_key)
-                    if proxy_url:
-                        if proxy_url.startswith("socks5://"):
-                            # Use different param depending on proxy type
-                            proxy = proxy_url
-                        else:
-                            proxies = {"http": proxy_url, "https": proxy_url}
                 except Exception as e:
                     debug_logger.log_warning(f"[reCAPTCHA {method}] Failed to get proxy: {e}")
-            
-            # For capsolver: if proxy available, use proxy-aware task type so the token is
-            # solved from the same egress IP as the API request, avoiding reCAPTCHA IP mismatch.
+
+            # For non-capsolver services: route the API call through the proxy so the
+            # captcha service sees the same IP as Flow API requests.
+            proxy = None
+            proxies = None
+            if method != "capsolver" and proxy_url:
+                if proxy_url.startswith("socks5://"):
+                    proxy = proxy_url
+                else:
+                    proxies = {"http": proxy_url, "https": proxy_url}
+
+            # For capsolver: pass proxy as task fields so capsolver solves from the
+            # same egress IP as the API request, avoiding reCAPTCHA token-IP mismatch.
             capsolver_proxy_fields: Optional[Dict[str, Any]] = None
             if method == "capsolver" and proxy_url:
                 capsolver_proxy_fields = self._proxy_url_to_capsolver_fields(proxy_url)
