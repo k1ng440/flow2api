@@ -951,20 +951,18 @@ class FlowClient:
                 last_error = new_upload_error
                 retry_reason = "network timeout" if self._is_timeout_error(new_upload_error) else self._get_retry_reason(str(new_upload_error))
 
-                # Legacy interface omits projectId; falling back could attach media to the wrong project.
+                if retry_reason and retry_attempt < max_retries - 1:
+                    debug_logger.log_warning(
+                        f"[UPLOAD] Upload hit {retry_reason}, retrying with new interface "
+                        f"({retry_attempt + 2}/{max_retries}, project_id={normalized_project_id or 'none'})..."
+                    )
+                    await asyncio.sleep(1)
+                    continue
                 if normalized_project_id:
-                    if retry_reason and retry_attempt < max_retries - 1:
-                        debug_logger.log_warning(
-                            f"[UPLOAD] Project-scoped upload hit {retry_reason}, retrying with new interface "
-                            f"({retry_attempt + 2}/{max_retries}, project_id={normalized_project_id})..."
-                        )
-                        await asyncio.sleep(1)
-                        continue
-                    raise RuntimeError(
-                        "Project-scoped image upload failed via /flow/uploadImage; "
-                        "legacy :uploadUserImage fallback is disabled because it may attach media "
-                        f"to a different project (project_id={normalized_project_id})."
-                    ) from new_upload_error
+                    debug_logger.log_warning(
+                        f"[UPLOAD] New interface failed for project {normalized_project_id}, "
+                        f"falling back to legacy endpoint (media may not be project-scoped): {new_upload_error}"
+                    )
 
                 debug_logger.log_warning(
                     f"[UPLOAD] New upload API failed, fallback to legacy endpoint: {new_upload_error}"
