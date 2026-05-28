@@ -509,6 +509,7 @@ class ProxyConfigRequest(BaseModel):
     proxy_url: Optional[str] = None
     media_proxy_enabled: Optional[bool] = None
     media_proxy_url: Optional[str] = None
+    warp_auto_reconnect: Optional[bool] = None
 
 
 class ProxyTestRequest(BaseModel):
@@ -1034,14 +1035,15 @@ async def import_tokens(
 @router.get("/api/config/proxy")
 async def get_proxy_config(token: str = Depends(verify_admin_token)):
     """Get proxy configuration"""
-    config = await proxy_manager.get_proxy_config()
+    proxy_cfg = await proxy_manager.get_proxy_config()
     return {
         "success": True,
         "config": {
-            "enabled": config.enabled,
-            "proxy_url": config.proxy_url,
-            "media_proxy_enabled": config.media_proxy_enabled,
-            "media_proxy_url": config.media_proxy_url
+            "enabled": proxy_cfg.enabled,
+            "proxy_url": proxy_cfg.proxy_url,
+            "media_proxy_enabled": proxy_cfg.media_proxy_enabled,
+            "media_proxy_url": proxy_cfg.media_proxy_url,
+            "warp_auto_reconnect": config.warp_auto_reconnect,
         }
     }
 
@@ -1049,12 +1051,13 @@ async def get_proxy_config(token: str = Depends(verify_admin_token)):
 @router.get("/api/proxy/config")
 async def get_proxy_config_alias(token: str = Depends(verify_admin_token)):
     """Get proxy configuration (alias for frontend compatibility)"""
-    config = await proxy_manager.get_proxy_config()
+    proxy_cfg = await proxy_manager.get_proxy_config()
     return {
-        "proxy_enabled": config.enabled,  # Frontend expects proxy_enabled
-        "proxy_url": config.proxy_url,
-        "media_proxy_enabled": config.media_proxy_enabled,
-        "media_proxy_url": config.media_proxy_url
+        "proxy_enabled": proxy_cfg.enabled,
+        "proxy_url": proxy_cfg.proxy_url,
+        "media_proxy_enabled": proxy_cfg.media_proxy_enabled,
+        "media_proxy_url": proxy_cfg.media_proxy_url,
+        "warp_auto_reconnect": config.warp_auto_reconnect,
     }
 
 
@@ -1071,6 +1074,8 @@ async def update_proxy_config_alias(
             media_proxy_enabled=request.media_proxy_enabled,
             media_proxy_url=request.media_proxy_url
         )
+        if request.warp_auto_reconnect is not None:
+            config.set_warp_auto_reconnect(request.warp_auto_reconnect)
     except ValueError as e:
         return {"success": False, "message": str(e)}
     return {"success": True, "message": "Proxy config updated successfully"}
@@ -1089,6 +1094,8 @@ async def update_proxy_config(
             media_proxy_enabled=request.media_proxy_enabled,
             media_proxy_url=request.media_proxy_url
         )
+        if request.warp_auto_reconnect is not None:
+            config.set_warp_auto_reconnect(request.warp_auto_reconnect)
     except ValueError as e:
         return {"success": False, "message": str(e)}
     return {"success": True, "message": "Proxy config updated successfully"}
