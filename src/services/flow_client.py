@@ -968,6 +968,10 @@ class FlowClient:
                         )
                         await asyncio.sleep(1)
                         continue
+                    if self.proxy_manager and at:
+                        _bad_proxy = self.proxy_manager._sticky_assignments.get(at[:16])
+                        if _bad_proxy:
+                            self.proxy_manager.flag_proxy(_bad_proxy)
                     raise RuntimeError(
                         "Project-scoped image upload failed via /flow/uploadImage; "
                         "legacy :uploadUserImage fallback is disabled because it may attach media "
