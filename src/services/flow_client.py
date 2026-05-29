@@ -2542,7 +2542,7 @@ class FlowClient:
             return False
 
         # Flag the proxy that caused the error so future picks avoid it
-        if retry_reason in ("TOO_MUCH_TRAFFIC rate limit", "reCAPTCHA evaluation failed") and self.proxy_manager:
+        if retry_reason in ("TOO_MUCH_TRAFFIC rate limit", "reCAPTCHA evaluation failed", "reCAPTCHA error") and self.proxy_manager:
             fingerprint = self._request_fingerprint_ctx.get()
             if isinstance(fingerprint, dict) and fingerprint.get("proxy_url"):
                 self.proxy_manager.flag_proxy(fingerprint["proxy_url"])
