@@ -3265,9 +3265,31 @@ class FlowClient:
                 debug_logger.log_info(f"[reCAPTCHA {method}] created task_id: {task_id}, response: {result_json}")
 
                 if not task_id:
+                    error_code = result_json.get('errorCode', '')
                     error_desc = result_json.get('errorDescription', 'Unknown error')
                     debug_logger.log_error(f"[reCAPTCHA {method}] Failed to create task: {error_desc}")
-                    return None
+                    # Capsolver can't reach the proxy from their infra — flag it and fall back
+                    # to ProxyLess so we get a token rather than failing entirely.
+                    if method == "capsolver" and error_code == "ERROR_PROXY_CONNECT_REFUSED" and capsolver_proxy_fields:
+                        debug_logger.log_warning(
+                            f"[reCAPTCHA capsolver] Proxy unreachable from CapSolver infra, falling back to ProxyLess"
+                        )
+                        if proxy_url and self.proxy_manager:
+                            self.proxy_manager.flag_proxy(proxy_url)
+                        for field in ("proxyType", "proxyAddress", "proxyPort", "proxyLogin", "proxyPassword"):
+                            create_data["task"].pop(field, None)
+                        create_data["task"]["type"] = "ReCaptchaV3EnterpriseTaskProxyLess"
+                        capsolver_proxy_fields = None
+                        result = await session.post(create_url, json=create_data, impersonate=self._CHROME_IMPERSONATE)
+                        debug_logger.log_info(f"[reCAPTCHA capsolver] ProxyLess fallback createTask status: {result.status_code}")
+                        result_json = result.json()
+                        task_id = result_json.get('taskId')
+                        debug_logger.log_info(f"[reCAPTCHA capsolver] ProxyLess fallback task_id: {task_id}, response: {result_json}")
+                        if not task_id:
+                            debug_logger.log_error(f"[reCAPTCHA capsolver] ProxyLess fallback also failed: {result_json.get('errorDescription', 'unknown')}")
+                            return None
+                    else:
+                        return None
 
                 get_url = f"{base_url}/getTaskResult"
                 for i in range(40):

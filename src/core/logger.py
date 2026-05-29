@@ -71,7 +71,7 @@ class DebugLogger:
             result = {}
             for key, value in data.items():
                 # Truncate specific large fields
-                if key in ("encodedImage", "base64", "imageData", "data") and isinstance(value, str) and len(value) > max_length:
+                if key in ("encodedImage", "base64", "imageData", "data", "imageBytes") and isinstance(value, str) and len(value) > max_length:
                     result[key] = f"{value[:100]}... (truncated, total {len(value)} chars)"
                 else:
                     result[key] = self._truncate_large_fields(value, max_length)
@@ -132,7 +132,7 @@ class DebugLogger:
             if body is not None:
                 self.logger.info("\n📦 Request Body:")
                 if isinstance(body, (dict, list)):
-                    body_str = json.dumps(body, indent=2, ensure_ascii=False)
+                    body_str = json.dumps(self._truncate_large_fields(body), indent=2, ensure_ascii=False)
                     self.logger.info(body_str)
                 else:
                     self.logger.info(str(body))
