@@ -48,7 +48,8 @@ REPUTE_DELAY = 0.6  # seconds between calls (free tier: ~1 req/sec)
 
 # flow2api reputation integration — set these to enable
 FLOW2API_URL = os.environ.get("FLOW2API_URL", "")
-FLOW2API_ADMIN_TOKEN = os.environ.get("FLOW2API_ADMIN_TOKEN", "")
+FLOW2API_USERNAME = os.environ.get("FLOW2API_USERNAME", "")
+FLOW2API_PASSWORD = os.environ.get("FLOW2API_PASSWORD", "")
 # Proxies with fail_count >= this are evicted; matches the 24h cooldown tier (fail 4+)
 FAIL_COUNT_EVICT = 4
 
@@ -172,13 +173,37 @@ async def test_proxy(proxy_url: str, session: aiohttp.ClientSession) -> bool:
     return False
 
 
-async def fetch_flow2api_reputation(session: aiohttp.ClientSession) -> dict:
+async def login_flow2api(session: aiohttp.ClientSession) -> str:
+    """Login to flow2api and return a session token, or empty string on failure."""
+    if not FLOW2API_URL or not FLOW2API_USERNAME or not FLOW2API_PASSWORD:
+        return ""
+    try:
+        url = f"{FLOW2API_URL.rstrip('/')}/api/admin/login"
+        async with session.post(
+            url,
+            json={"username": FLOW2API_USERNAME, "password": FLOW2API_PASSWORD},
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            if resp.status != 200:
+                log.warning(f"flow2api login failed: HTTP {resp.status}")
+                return ""
+            data = await resp.json()
+            token = data.get("token", "")
+            if token:
+                log.info("flow2api login successful")
+            return token
+    except Exception as e:
+        log.warning(f"flow2api login error: {e}")
+        return ""
+
+
+async def fetch_flow2api_reputation(session: aiohttp.ClientSession, token: str) -> dict:
     """Fetch proxy reputation from flow2api API. Returns {scheme://host:port: entry} or {} on error/unconfigured."""
-    if not FLOW2API_URL or not FLOW2API_ADMIN_TOKEN:
+    if not FLOW2API_URL or not token:
         return {}
     try:
         url = f"{FLOW2API_URL.rstrip('/')}/api/proxy/reputation"
-        headers = {"Authorization": f"Bearer {FLOW2API_ADMIN_TOKEN}"}
+        headers = {"Authorization": f"Bearer {token}"}
         async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
             if resp.status != 200:
                 log.warning(f"flow2api reputation fetch failed: HTTP {resp.status}")
@@ -265,7 +290,8 @@ async def run(limit: int, output: str):
     t0 = time.monotonic()
 
     # Fetch flow2api reputation and existing proxy list before harvesting
-    reputation = await fetch_flow2api_reputation(direct_session)
+    flow2api_token = await login_flow2api(direct_session)
+    reputation = await fetch_flow2api_reputation(direct_session, flow2api_token)
     existing = read_existing_proxies(output)
 
     # Keep existing proxies whose flow2api fail_count is below the eviction threshold
