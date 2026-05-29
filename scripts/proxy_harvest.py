@@ -46,6 +46,12 @@ CONCURRENT_TESTS = 8
 # type field for raw IPs returns protocol (HTTP/SOCKS5), not Residential/Datacenter.
 REPUTE_DELAY = 0.6  # seconds between calls (free tier: ~1 req/sec)
 
+# flow2api reputation integration — set these to enable
+FLOW2API_URL = os.environ.get("FLOW2API_URL", "")
+FLOW2API_ADMIN_TOKEN = os.environ.get("FLOW2API_ADMIN_TOKEN", "")
+# Proxies with fail_count >= this are evicted; matches the 24h cooldown tier (fail 4+)
+FAIL_COUNT_EVICT = 4
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
@@ -166,6 +172,47 @@ async def test_proxy(proxy_url: str, session: aiohttp.ClientSession) -> bool:
     return False
 
 
+async def fetch_flow2api_reputation(session: aiohttp.ClientSession) -> dict:
+    """Fetch proxy reputation from flow2api API. Returns {scheme://host:port: entry} or {} on error/unconfigured."""
+    if not FLOW2API_URL or not FLOW2API_ADMIN_TOKEN:
+        return {}
+    try:
+        url = f"{FLOW2API_URL.rstrip('/')}/api/proxy/reputation"
+        headers = {"Authorization": f"Bearer {FLOW2API_ADMIN_TOKEN}"}
+        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            if resp.status != 200:
+                log.warning(f"flow2api reputation fetch failed: HTTP {resp.status}")
+                return {}
+            data = await resp.json()
+            reputation = {p["proxy"]: p for p in data.get("proxies", [])}
+            log.info(f"flow2api reputation: {len(reputation)} proxies fetched")
+            return reputation
+    except Exception as e:
+        log.warning(f"flow2api reputation fetch error: {e}")
+        return {}
+
+
+def _proxy_display_key(proxy_url: str) -> str:
+    """Return scheme://host:port for matching against reputation keys (strips credentials)."""
+    try:
+        p = urlparse(proxy_url)
+        return f"{p.scheme}://{p.hostname}:{p.port}"
+    except Exception:
+        return proxy_url
+
+
+def read_existing_proxies(path: str) -> list[str]:
+    """Read existing proxy list file, return non-comment proxy URLs."""
+    try:
+        with open(path) as f:
+            return [l.strip() for l in f if l.strip() and not l.startswith("#")]
+    except FileNotFoundError:
+        return []
+    except Exception as e:
+        log.warning(f"Failed to read existing proxy list: {e}")
+        return []
+
+
 async def run(limit: int, output: str):
     try:
         from proxybroker import Broker
@@ -208,12 +255,33 @@ async def run(limit: int, output: str):
 
     _load_repute_cache()
     using_key = bool(os.environ.get("PROXYCHECK_KEY"))
+    using_flow2api = bool(FLOW2API_URL and FLOW2API_ADMIN_TOKEN)
     log.info(
         f"Harvesting: types={FIND_TYPES} countries={FIND_COUNTRIES} "
         f"level={FIND_LEVEL} limit={limit} | "
-        f"proxycheck={'key' if using_key else 'no-key (100/day limit)'}"
+        f"proxycheck={'key' if using_key else 'no-key (100/day limit)'} | "
+        f"flow2api={'enabled' if using_flow2api else 'disabled'}"
     )
     t0 = time.monotonic()
+
+    # Fetch flow2api reputation and existing proxy list before harvesting
+    reputation = await fetch_flow2api_reputation(direct_session)
+    existing = read_existing_proxies(output)
+
+    # Keep existing proxies whose flow2api fail_count is below the eviction threshold
+    kept: list[str] = []
+    evicted: list[str] = []
+    for proxy in existing:
+        key = _proxy_display_key(proxy)
+        rep = reputation.get(key)
+        if rep and rep.get("fail_count", 0) >= FAIL_COUNT_EVICT:
+            evicted.append(proxy)
+            log.info(f"EVICT fail_count={rep['fail_count']} {key}")
+        else:
+            kept.append(proxy)
+
+    if reputation:
+        log.info(f"Existing proxies: {len(kept)} kept, {len(evicted)} evicted (fail_count >= {FAIL_COUNT_EVICT})")
 
     try:
         await asyncio.gather(
@@ -233,19 +301,28 @@ async def run(limit: int, output: str):
         await proxy_session.close()
 
     elapsed = time.monotonic() - t0
-    log.info(f"Finished in {elapsed:.1f}s — {len(good)}/{limit} proxies passed all checks")
+    log.info(f"Finished in {elapsed:.1f}s — {len(good)}/{limit} new proxies passed all checks")
 
-    if not good:
-        log.warning("No working proxies — output file unchanged")
+    # Combine: kept existing + newly validated, dedup by host:port
+    seen_keys: set = set()
+    final: list[str] = []
+    for proxy in kept + good:
+        key = _proxy_display_key(proxy)
+        if key not in seen_keys:
+            seen_keys.add(key)
+            final.append(proxy)
+
+    if not final:
+        log.warning("No proxies after merge — output file unchanged")
         return
 
     out_dir = os.path.dirname(os.path.abspath(output))
     with tempfile.NamedTemporaryFile("w", dir=out_dir, delete=False, suffix=".tmp") as f:
         tmp_path = f.name
-        for url in good:
+        for url in final:
             f.write(url + "\n")
     os.replace(tmp_path, output)
-    log.info(f"Wrote {len(good)} proxies → {output}")
+    log.info(f"Wrote {len(final)} proxies → {output} ({len(kept)} kept, {len(good)} new, {len(evicted)} evicted)")
 
 
 def main():
