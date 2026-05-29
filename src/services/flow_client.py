@@ -6,7 +6,6 @@ import time
 import uuid
 import random
 import base64
-import ssl
 from typing import Dict, Any, Optional, List, Union, Callable, Awaitable
 from urllib.parse import quote, urlparse
 import urllib.error
@@ -153,7 +152,6 @@ class FlowClient:
         use_media_proxy: bool = False,
         respect_fingerprint_proxy: bool = True,
         force_no_proxy: bool = False,
-        allow_urllib_fallback: bool = True
     ) -> Dict[str, Any]:
         """Unified HTTP request handler.
 
@@ -169,7 +167,6 @@ class FlowClient:
             timeout: custom timeout in seconds; defaults to instance default
             use_media_proxy: whether to use image upload/download proxy
             respect_fingerprint_proxy: whether to prefer proxy from captcha browser fingerprint
-            allow_urllib_fallback: whether to fall back to urllib on curl_cffi network failure
         """
         fingerprint = self._request_fingerprint_ctx.get()
 
@@ -345,40 +342,13 @@ class FlowClient:
                 debug_logger.log_error(f"[API FAILED] Request Body: {json_data}")
                 debug_logger.log_error(f"[API FAILED] Exception: {error_msg}")
 
-            is_connection_error = self._should_fallback_to_urllib(error_msg)
-
-            if allow_urllib_fallback and is_connection_error:
-                debug_logger.log_warning(
-                    f"[HTTP FALLBACK] curl_cffi request failed, falling back to urllib: {method.upper()} {url}"
-                )
-                try:
-                    return await asyncio.to_thread(
-                        self._sync_json_request_via_urllib,
-                        method.upper(),
-                        url,
-                        headers,
-                        json_data,
-                        proxy_url,
-                        request_timeout,
-                    )
-                except Exception as fallback_error:
-                    debug_logger.log_error(
-                        f"[HTTP FALLBACK] urllib fallback also failed: {fallback_error}"
-                    )
-                    if proxy_url and self.proxy_manager:
-                        self.proxy_manager.record_request(proxy_url, ok=False)
-                        self.proxy_manager.flag_proxy(proxy_url)
-                    raise Exception(
-                        f"Flow API request failed: curl={error_msg}; urllib={fallback_error}"
-                    )
-
-            if is_connection_error and proxy_url and self.proxy_manager:
+            if proxy_url and self.proxy_manager and self._is_connection_error(error_msg):
                 self.proxy_manager.record_request(proxy_url, ok=False)
                 self.proxy_manager.flag_proxy(proxy_url)
             raise Exception(f"Flow API request failed: {error_msg}")
 
-    def _should_fallback_to_urllib(self, error_message: str) -> bool:
-        """Determine whether to fall back from curl_cffi to urllib."""
+    def _is_connection_error(self, error_message: str) -> bool:
+        """Return True for curl_cffi network/connection failures (used to flag the proxy)."""
         error_lower = (error_message or "").lower()
         return any(
             keyword in error_lower
@@ -397,64 +367,6 @@ class FlowClient:
                 "network is unreachable",
             ]
         )
-
-    def _sync_json_request_via_urllib(
-        self,
-        method: str,
-        url: str,
-        headers: Optional[Dict[str, Any]],
-        json_data: Optional[Dict[str, Any]],
-        proxy_url: Optional[str],
-        timeout: int,
-    ) -> Dict[str, Any]:
-        """Execute a JSON request via urllib as a network fallback for curl_cffi."""
-        request_headers = dict(headers or {})
-        request_headers.setdefault("accept", "application/json")
-
-        data = None
-        if method.upper() != "GET" and json_data is not None:
-            data = json.dumps(json_data, ensure_ascii=False).encode("utf-8")
-            request_headers["content-type"] = "text/plain;charset=UTF-8"
-
-        handlers = [urllib.request.HTTPSHandler(context=ssl.create_default_context())]
-        if proxy_url:
-            handlers.append(
-                urllib.request.ProxyHandler(
-                    {"http": proxy_url, "https": proxy_url}
-                )
-            )
-
-        opener = urllib.request.build_opener(*handlers)
-        request = urllib.request.Request(
-            url=url,
-            data=data,
-            headers=request_headers,
-            method=method.upper(),
-        )
-
-        try:
-            with opener.open(
-                request,
-                timeout=timeout,
-            ) as response:
-                payload = response.read()
-                status_code = int(response.getcode() or 0)
-        except urllib.error.HTTPError as exc:
-            payload = exc.read() if hasattr(exc, "read") else b""
-            status_code = int(getattr(exc, "code", 500) or 500)
-            body_text = payload.decode("utf-8", errors="replace")
-            raise Exception(f"HTTP Error {status_code}: {body_text[:200]}") from exc
-        except Exception as exc:
-            raise Exception(str(exc)) from exc
-
-        body_text = payload.decode("utf-8", errors="replace")
-        if status_code >= 400:
-            raise Exception(f"HTTP Error {status_code}: {body_text[:200]}")
-
-        try:
-            return json.loads(body_text) if body_text else {}
-        except Exception as exc:
-            raise Exception(f"Invalid JSON response: {body_text[:200]}") from exc
 
     def _is_timeout_error(self, error: Exception) -> bool:
         """Determine whether the error is a network timeout, for fast-fail retry."""
@@ -535,7 +447,6 @@ class FlowClient:
                     use_at=True,
                     at_token=at,
                     timeout=timeout,
-                    allow_urllib_fallback=False
                 ),
                 timeout=timeout + 5
             )
