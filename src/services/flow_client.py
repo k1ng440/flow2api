@@ -21,6 +21,10 @@ except ImportError:
     httpx = None
 
 
+class _CaptchaTimeoutError(Exception):
+    """API captcha service timed out polling — retry may succeed."""
+
+
 class FlowClient:
     """VideoFX API client"""
 
@@ -3141,7 +3145,15 @@ class FlowClient:
             if proxy_url:
                 fingerprint_ctx["proxy_url"] = proxy_url
             self._set_request_fingerprint(fingerprint_ctx)
-            token = await self._get_api_captcha_token(captcha_method, project_id, action, sticky_key=sticky_key)
+            token = None
+            for _attempt in range(2):
+                try:
+                    token = await self._get_api_captcha_token(captcha_method, project_id, action, sticky_key=sticky_key)
+                    break
+                except _CaptchaTimeoutError:
+                    if _attempt == 0:
+                        debug_logger.log_warning(f"[reCAPTCHA {captcha_method}] poll timed out, retrying once...")
+                        await asyncio.sleep(3)
             return token, None
         else:
             debug_logger.log_info(f"[reCAPTCHA] Unknown captcha method: {captcha_method}")
@@ -3289,12 +3301,19 @@ class FlowClient:
                                         },
                                     }
                             return response
+                    elif status == 'failed':
+                        error_code = result_json.get('errorCode', 'unknown')
+                        error_desc = result_json.get('errorDescription', 'unknown')
+                        debug_logger.log_error(f"[reCAPTCHA {method}] Task failed: {error_code} — {error_desc}")
+                        return None
 
                     await asyncio.sleep(3)
 
                 debug_logger.log_error(f"[reCAPTCHA {method}] Timeout waiting for token")
-                return None
+                raise _CaptchaTimeoutError(f"{method} poll timed out")
 
+        except _CaptchaTimeoutError:
+            raise
         except Exception as e:
             debug_logger.log_error(f"[reCAPTCHA {method}] error: {str(e)}")
             return None
