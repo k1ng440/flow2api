@@ -1275,7 +1275,13 @@ class GenerationHandler:
             # Reset error counter (clear consecutive error count on success)
             await self.token_manager.record_success(token.id)
 
-            debug_logger.log_info(f"[GENERATION] ✅ Generation completed successfully")
+            _proxy_label = "none (direct)"
+            if self.proxy_manager and token and token.at:
+                _p_url = await self.proxy_manager.get_request_proxy_url(sticky_key=token.at[:16])
+                if _p_url:
+                    _pp = urlparse(_p_url)
+                    _proxy_label = f"{_pp.scheme}://{_pp.hostname}:{_pp.port}"
+            debug_logger.log_info(f"[GENERATION] ✅ Generation completed successfully, proxy={_proxy_label}")
 
             # 7. Record success log
             duration = time.time() - start_time
