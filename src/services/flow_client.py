@@ -256,7 +256,7 @@ class FlowClient:
             if isinstance(fingerprint, dict):
                 proxy_for_log = proxy_url if proxy_url else "direct"
                 debug_logger.log_info(
-                    f"[FINGERPRINT] Submitting request with captcha browser fingerprint: UA={headers.get('User-Agent', '')[:120]}, proxy={proxy_for_log}"
+                    f"[FINGERPRINT] Submitting request with captcha browser fingerprint: UA={headers.get('user-agent', '')[:120]}, proxy={proxy_for_log}"
                 )
             debug_logger.log_request(
                 method=method,
