@@ -280,7 +280,7 @@ async def run(limit: int, output: str):
 
     _load_repute_cache()
     using_key = bool(os.environ.get("PROXYCHECK_KEY"))
-    using_flow2api = bool(FLOW2API_URL and FLOW2API_ADMIN_TOKEN)
+    using_flow2api = bool(FLOW2API_URL and FLOW2API_USERNAME and FLOW2API_PASSWORD)
     log.info(
         f"Harvesting: types={FIND_TYPES} countries={FIND_COUNTRIES} "
         f"level={FIND_LEVEL} limit={limit} | "
