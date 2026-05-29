@@ -35,6 +35,12 @@ TEST_URL = "https://labs.google/fx/tools/flow"
 TEST_TIMEOUT = 20
 TEST_BODY_RE = re.compile(r"<title[^>]*>[^<]*flow[^<]*<", re.IGNORECASE)
 
+# Stage 3 — must be reachable through the proxy for reCAPTCHA solving to work
+RECAPTCHA_JS_URL = "https://www.google.com/recaptcha/enterprise.js"
+RECAPTCHA_SITE_KEY = "6LdsFiUsAAAAAIjVDZcuLhaHiDn5nnHVXVRQGeMV"
+API_DOMAIN_URL = "https://aisandbox-pa.googleapis.com/"
+GOOGLE_TEST_TIMEOUT = 15
+
 FIND_LIMIT = 60
 MAX_PROXIES = 20  # cap on proxies.txt — keep the N with lowest fail_count
 FIND_TYPES = ["HTTP", "HTTPS"]
@@ -178,6 +184,64 @@ async def test_proxy(proxy_url: str, session: aiohttp.ClientSession) -> tuple[bo
     return False, 0.0
 
 
+async def test_google_endpoints(proxy_url: str, session: aiohttp.ClientSession) -> bool:
+    """Stage 3: verify proxy can reach reCAPTCHA Enterprise JS and the generation API domain.
+
+    A proxy that passes the Flow page test may still be blocked from these endpoints,
+    which would cause token-solving and generation failures at runtime.
+    """
+    timeout = aiohttp.ClientTimeout(total=GOOGLE_TEST_TIMEOUT, connect=8, sock_read=10)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    }
+
+    # Check 1: reCAPTCHA Enterprise JS must be fetchable with recognizable content
+    try:
+        async with session.get(
+            f"{RECAPTCHA_JS_URL}?render={RECAPTCHA_SITE_KEY}",
+            proxy=proxy_url,
+            ssl=True,
+            timeout=timeout,
+            headers=headers,
+        ) as resp:
+            if resp.status >= 400:
+                log.info(f"RCAP FAIL HTTP {resp.status} {proxy_url}")
+                return False
+            body = await resp.content.read(512)
+            text = body.decode("utf-8", errors="ignore")
+            if "recaptcha" not in text.lower():
+                log.info(f"RCAP FAIL body {proxy_url}")
+                return False
+    except asyncio.TimeoutError:
+        log.debug(f"RCAP FAIL timeout {proxy_url}")
+        return False
+    except Exception as e:
+        log.debug(f"RCAP FAIL {proxy_url}: {type(e).__name__}: {e}")
+        return False
+
+    # Check 2: generation API domain must be reachable (any HTTP response = success)
+    try:
+        async with session.get(
+            API_DOMAIN_URL,
+            proxy=proxy_url,
+            ssl=True,
+            timeout=timeout,
+            headers=headers,
+            allow_redirects=False,
+        ) as _resp:
+            pass
+    except asyncio.TimeoutError:
+        log.debug(f"API FAIL timeout {proxy_url}")
+        return False
+    except Exception as e:
+        log.debug(f"API FAIL {proxy_url}: {type(e).__name__}: {e}")
+        return False
+
+    log.info(f"GOOGLE PASS {proxy_url}")
+    return True
+
+
 async def login_flow2api(session: aiohttp.ClientSession) -> str:
     """Login to flow2api and return a session token, or empty string on failure."""
     if not FLOW2API_URL or not FLOW2API_USERNAME or not FLOW2API_PASSWORD:
@@ -269,20 +333,26 @@ async def run(limit: int, output: str):
         # Stage 1: reputation pre-filter
         if ip and not await check_reputation(ip, direct_session, repute_sem):
             return
-        # Stage 2: actually reach Google Flow through the proxy
+        # Stage 2 + 3: Flow page check then Google reCAPTCHA + API domain check
         async with flow_sem:
             passed, latency_ms = await test_proxy(proxy_url, proxy_session)
-            if passed:
-                good.append((proxy_url, latency_ms))
+            if not passed:
+                return
+            if not await test_google_endpoints(proxy_url, proxy_session):
+                return
+            good.append((proxy_url, latency_ms))
 
     async def retest_existing(proxy_url: str):
-        """Re-validate an existing pool proxy — skip reputation check, just test connectivity."""
+        """Re-validate an existing pool proxy — skip reputation check, run all connectivity tests."""
         async with flow_sem:
             passed, latency_ms = await test_proxy(proxy_url, proxy_session)
-            if passed:
-                kept_alive.append((proxy_url, latency_ms))
-            else:
-                log.info(f"DEAD (retest failed) {_proxy_display_key(proxy_url)}")
+            if not passed:
+                log.info(f"DEAD (flow fail) {_proxy_display_key(proxy_url)}")
+                return
+            if not await test_google_endpoints(proxy_url, proxy_session):
+                log.info(f"DEAD (google endpoints fail) {_proxy_display_key(proxy_url)}")
+                return
+            kept_alive.append((proxy_url, latency_ms))
 
     async def drain():
         while True:
