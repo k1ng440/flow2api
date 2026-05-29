@@ -2205,13 +2205,15 @@ async def plugin_update_token(request: dict, authorization: Optional[str] = Head
                     "success": True,
                     "message": f"Token updated and auto-enabled for {email}",
                     "action": "updated",
-                    "auto_enabled": True
+                    "auto_enabled": True,
+                    "at_expires": at_expires.isoformat() if at_expires else None,
                 }
 
             return {
                 "success": True,
                 "message": f"Token updated for {email}",
-                "action": "updated"
+                "action": "updated",
+                "at_expires": at_expires.isoformat() if at_expires else None,
             }
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to update token: {str(e)}")
@@ -2227,7 +2229,8 @@ async def plugin_update_token(request: dict, authorization: Optional[str] = Head
                 "success": True,
                 "message": f"Token added for {new_token.email}",
                 "action": "added",
-                "token_id": new_token.id
+                "token_id": new_token.id,
+                "at_expires": at_expires.isoformat() if at_expires else None,
             }
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to add token: {str(e)}")

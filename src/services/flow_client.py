@@ -885,6 +885,16 @@ class FlowClient:
 
         mime_type = self._detect_image_mime_type(image_bytes)
 
+        if self.db:
+            import hashlib as _hashlib
+            _cache_key = _hashlib.sha256(image_bytes + (project_id or "").encode()).hexdigest()
+            _cached = await self.db.get_upload_cache(_cache_key)
+            if _cached:
+                debug_logger.log_info(f"[UPLOAD] Cache hit: {_cached}")
+                return _cached
+        else:
+            _cache_key = None
+
         image_base64 = base64.b64encode(image_bytes).decode('utf-8')
 
         # Try new upload interface first: /v1/flow/uploadImage; fall back to legacy on failure
@@ -953,6 +963,8 @@ class FlowClient:
                     or new_result.get("mediaGenerationId", {}).get("mediaGenerationId")
                 )
                 if media_id:
+                    if self.db and _cache_key:
+                        await self.db.set_upload_cache(_cache_key, media_id)
                     return media_id
                 raise Exception(f"Invalid upload response: missing media id, keys={list(new_result.keys())}")
             except Exception as new_upload_error:
@@ -997,6 +1009,8 @@ class FlowClient:
                     or legacy_result.get("media", {}).get("name")
                 )
                 if media_id:
+                    if self.db and _cache_key:
+                        await self.db.set_upload_cache(_cache_key, media_id)
                     return media_id
                 raise Exception(f"Legacy upload response missing media id: keys={list(legacy_result.keys())}")
             except Exception as legacy_upload_error:

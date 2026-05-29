@@ -399,6 +399,17 @@ class Database:
                     )
                 """)
 
+            # Check and create upload_cache table if missing
+            if not await self._table_exists(db, "upload_cache"):
+                print("  ✓ Creating missing table: upload_cache")
+                await db.execute("""
+                    CREATE TABLE upload_cache (
+                        image_hash TEXT PRIMARY KEY,
+                        media_id TEXT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+
             # Check and create plugin_config table if missing
             if not await self._table_exists(db, "plugin_config"):
                 print("  ✓ Creating missing table: plugin_config")
@@ -779,6 +790,15 @@ class Database:
                     auto_enable_on_update BOOLEAN DEFAULT 1,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Upload cache table (image_hash -> media_id, avoids re-uploading identical images)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS upload_cache (
+                    image_hash TEXT PRIMARY KEY,
+                    media_id TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
 
@@ -1983,4 +2003,24 @@ class Database:
                     VALUES (1, ?, ?)
                 """, (connection_token, auto_enable_on_update))
 
+            await db.commit()
+
+    # Upload cache operations
+    async def get_upload_cache(self, image_hash: str) -> Optional[str]:
+        """Return cached media_id for the given image hash, or None on miss."""
+        async with self._connect() as db:
+            cursor = await db.execute(
+                "SELECT media_id FROM upload_cache WHERE image_hash = ?",
+                (image_hash,)
+            )
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+    async def set_upload_cache(self, image_hash: str, media_id: str):
+        """Persist image_hash -> media_id so identical images skip re-upload."""
+        async with self._connect(write=True) as db:
+            await db.execute(
+                "INSERT OR REPLACE INTO upload_cache (image_hash, media_id) VALUES (?, ?)",
+                (image_hash, media_id)
+            )
             await db.commit()
