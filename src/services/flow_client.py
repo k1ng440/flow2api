@@ -359,6 +359,7 @@ class FlowClient:
                 "curl: (35)",
                 "curl: (52)",
                 "curl: (56)",
+                "curl: (60)",
                 "connection timed out",
                 "could not connect",
                 "failed to connect",

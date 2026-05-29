@@ -150,7 +150,7 @@ async def test_proxy(proxy_url: str, session: aiohttp.ClientSession) -> tuple[bo
         async with session.get(
             TEST_URL,
             proxy=proxy_url,
-            ssl=False,
+            ssl=True,
             allow_redirects=True,
             max_redirects=5,
             headers=headers,
