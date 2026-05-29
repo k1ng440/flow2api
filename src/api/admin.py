@@ -583,17 +583,21 @@ class ImportTokensRequest(BaseModel):
 # ========== Auth Middleware ==========
 
 async def verify_admin_token(authorization: str = Header(None)):
-    """Verify admin session token (NOT API key)"""
+    """Verify admin session token or static api_key."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing authorization")
 
     token = authorization[7:]
 
-    # Check if token is in active session tokens
-    if token not in active_admin_tokens:
-        raise HTTPException(status_code=401, detail="Invalid or expired admin token")
+    if token in active_admin_tokens:
+        return token
 
-    return token
+    # Also accept the static api_key from admin_config (for automation/scripts)
+    admin_config = await db.get_admin_config()
+    if admin_config and token == admin_config.api_key:
+        return token
+
+    raise HTTPException(status_code=401, detail="Invalid or expired admin token")
 
 
 # ========== Auth Endpoints ==========
