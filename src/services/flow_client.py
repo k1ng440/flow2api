@@ -323,7 +323,7 @@ class FlowClient:
                     debug_logger.log_error(f"[API FAILED] Request Body: {json_data}")
                     debug_logger.log_error(f"[API FAILED] Response: {response.text}")
                     
-                    if proxy_url and self.proxy_manager:
+                    if proxy_url and self.proxy_manager and "PUBLIC_ERROR_PER_MODEL_DAILY_QUOTA_REACHED" not in error_reason:
                         self.proxy_manager.record_request(proxy_url, ok=False)
                     raise Exception(error_reason)
 

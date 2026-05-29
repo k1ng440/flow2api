@@ -1355,8 +1355,11 @@ class GenerationHandler:
             error_msg = f"Generation failed: {str(e)}"
             debug_logger.log_error(f"[GENERATION] ❌ {error_msg}")
             if token:
-                # Record error (all errors handled uniformly, no special 429 handling)
-                await self.token_manager.record_error(token.id)
+                if "PUBLIC_ERROR_PER_MODEL_DAILY_QUOTA_REACHED" in str(e):
+                    debug_logger.log_warning(f"[GENERATION] Daily quota exhausted for token {token.id}, banning for 12h")
+                    await self.token_manager.ban_token_for_429(token.id)
+                else:
+                    await self.token_manager.record_error(token.id)
 
             # Persist final failure state before returning error response to avoid log stuck at 102.
             duration = time.time() - start_time
