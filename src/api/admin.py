@@ -1133,6 +1133,17 @@ async def clear_proxy_flags(token: str = Depends(verify_admin_token)):
     return {"success": True, "message": "All proxy flags cleared"}
 
 
+@router.get("/api/proxy/reputation")
+async def get_proxy_reputation(token: str = Depends(verify_admin_token)):
+    """Get reputation data for all proxies in the current list.
+
+    Returns per-proxy fail_count, flagged status, cooldown_remaining_seconds,
+    sticky_count (accounts currently assigned to it), and in_list flag.
+    Credentials stripped from proxy URLs — matched by scheme://host:port.
+    """
+    return {"proxies": proxy_manager.get_proxy_reputation()}
+
+
 @router.post("/api/proxy/test")
 async def test_proxy_connectivity(
     request: ProxyTestRequest,

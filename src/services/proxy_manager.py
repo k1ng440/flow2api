@@ -1,9 +1,10 @@
 """Proxy management module"""
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import re
 import asyncio
 import time
 import random
+from urllib.parse import urlparse
 from ..core.database import Database
 from ..core.models import ProxyConfig
 from ..core.logger import debug_logger
@@ -307,6 +308,45 @@ class ProxyManager:
         if cfg and cfg.capsolver_proxy_url:
             return cfg.capsolver_proxy_url
         return await self.get_request_proxy_url(sticky_key=sticky_key)
+
+    def get_proxy_reputation(self) -> List[Dict[str, Any]]:
+        """Return reputation data for all proxies in the current list plus any still-flagged removed proxies."""
+        now = time.monotonic()
+        result = []
+        seen: set = set()
+
+        for proxy in self._proxy_list_cache:
+            entry = self._proxy_flags.get(proxy, {})
+            remaining = max(0.0, entry.get("cooldown_until", 0) - now)
+            sticky_count = sum(1 for v in self._sticky_assignments.values() if v == proxy)
+            p = urlparse(proxy)
+            result.append({
+                "proxy": f"{p.scheme}://{p.hostname}:{p.port}",
+                "fail_count": entry.get("fail_count", 0),
+                "flagged": remaining > 0,
+                "cooldown_remaining_seconds": round(remaining),
+                "sticky_count": sticky_count,
+                "in_list": True,
+            })
+            seen.add(proxy)
+
+        # Include flagged proxies that were removed from the list but still on cooldown
+        for proxy, entry in self._proxy_flags.items():
+            if proxy in seen:
+                continue
+            remaining = max(0.0, entry.get("cooldown_until", 0) - now)
+            if remaining > 0:
+                p = urlparse(proxy)
+                result.append({
+                    "proxy": f"{p.scheme}://{p.hostname}:{p.port}",
+                    "fail_count": entry.get("fail_count", 0),
+                    "flagged": True,
+                    "cooldown_remaining_seconds": round(remaining),
+                    "sticky_count": 0,
+                    "in_list": False,
+                })
+
+        return result
 
     async def get_proxy_config(self) -> ProxyConfig:
         """Get proxy configuration"""
