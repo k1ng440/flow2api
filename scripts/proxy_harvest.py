@@ -147,7 +147,7 @@ async def test_proxy(proxy_url: str, session: aiohttp.ClientSession) -> tuple[bo
     """Return (passed, latency_ms). latency_ms is 0 on failure."""
     headers = {
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                      "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+                      "(KHTML, like Gecko) Chrome/136.0.7103.114 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.5",
     }
@@ -193,7 +193,7 @@ async def test_google_endpoints(proxy_url: str, session: aiohttp.ClientSession) 
     timeout = aiohttp.ClientTimeout(total=GOOGLE_TEST_TIMEOUT, connect=8, sock_read=10)
     headers = {
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                      "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+                      "(KHTML, like Gecko) Chrome/136.0.7103.114 Safari/537.36",
     }
 
     # Check 1: reCAPTCHA Enterprise JS must be fetchable with recognizable content
