@@ -326,9 +326,12 @@ class FlowClient:
                     debug_logger.log_error(f"[API FAILED] Request Body: {json_data}")
                     debug_logger.log_error(f"[API FAILED] Response: {response.text}")
                     
+                    if proxy_url and self.proxy_manager:
+                        self.proxy_manager.record_request(proxy_url, ok=False)
                     raise Exception(error_reason)
 
                 if proxy_url and self.proxy_manager:
+                    self.proxy_manager.record_request(proxy_url, ok=True)
                     self.proxy_manager.unflag_proxy(proxy_url)
                 return response.json()
 
@@ -363,12 +366,14 @@ class FlowClient:
                         f"[HTTP FALLBACK] urllib fallback also failed: {fallback_error}"
                     )
                     if proxy_url and self.proxy_manager:
+                        self.proxy_manager.record_request(proxy_url, ok=False)
                         self.proxy_manager.flag_proxy(proxy_url)
                     raise Exception(
                         f"Flow API request failed: curl={error_msg}; urllib={fallback_error}"
                     )
 
             if is_connection_error and proxy_url and self.proxy_manager:
+                self.proxy_manager.record_request(proxy_url, ok=False)
                 self.proxy_manager.flag_proxy(proxy_url)
             raise Exception(f"Flow API request failed: {error_msg}")
 
@@ -3135,10 +3140,17 @@ class FlowClient:
             # Build a fixed UA that will be passed to the captcha service (via userAgent in createTask)
             # so the token is minted with the same UA we send in the Flow API request.
             api_captcha_ua = f"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{self._CHROME_FULL_VERSIONS[0]} Safari/537.36"
+            # Resolve proxy once and share it with _get_api_captcha_token so the reCAPTCHA token
+            # is solved from the same egress IP as the Flow API request that uses it.
+            # For capsolver the proxy is embedded as task fields (capsolver's own HTTP goes direct);
+            # for other services the proxy is used for their createTask/getTaskResult HTTP calls.
             proxy_url = None
             if self.proxy_manager:
                 try:
-                    proxy_url = await self.proxy_manager.get_request_proxy_url(sticky_key=sticky_key)
+                    if captcha_method == "capsolver":
+                        proxy_url = await self.proxy_manager.get_capsolver_proxy_url(sticky_key=sticky_key)
+                    else:
+                        proxy_url = await self.proxy_manager.get_request_proxy_url(sticky_key=sticky_key)
                 except Exception as e:
                     debug_logger.log_warning(f"[reCAPTCHA] Failed to get proxy for API captcha: {e}")
             fingerprint_ctx: Dict[str, Any] = {"user_agent": api_captcha_ua}
@@ -3148,7 +3160,7 @@ class FlowClient:
             token = None
             for _attempt in range(2):
                 try:
-                    token = await self._get_api_captcha_token(captcha_method, project_id, action, sticky_key=sticky_key)
+                    token = await self._get_api_captcha_token(captcha_method, project_id, action, sticky_key=sticky_key, proxy_url=proxy_url)
                     break
                 except _CaptchaTimeoutError:
                     if _attempt == 0:
@@ -3160,13 +3172,15 @@ class FlowClient:
             self._set_request_fingerprint(None)
             return None, None
 
-    async def _get_api_captcha_token(self, method: str, project_id: str, action: str = "IMAGE_GENERATION", sticky_key: Optional[str] = None) -> Optional[str]:
+    async def _get_api_captcha_token(self, method: str, project_id: str, action: str = "IMAGE_GENERATION", sticky_key: Optional[str] = None, proxy_url: Optional[str] = None) -> Optional[str]:
         """Generic API captcha service.
 
         Args:
             method: captcha service type
             project_id: project ID
             action: reCAPTCHA action type (IMAGE_GENERATION or VIDEO_GENERATION)
+            proxy_url: pre-resolved proxy URL (same one set in the request fingerprint) so
+                       the token is minted from the same egress IP as the Flow API request.
         """
         # Get config
         if method == "yescaptcha":
@@ -3202,19 +3216,8 @@ class FlowClient:
         page_action = action
 
         try:
-            # Resolve proxy URL for capsolver task fields (IP alignment).
-            # capsolver API HTTP calls go direct — routing them through the proxy
-            # causes timeouts when the proxy is unavailable.
-            proxy_url = None
-            if self.proxy_manager:
-                try:
-                    if method == "capsolver":
-                        proxy_url = await self.proxy_manager.get_capsolver_proxy_url(sticky_key=sticky_key)
-                    else:
-                        proxy_url = await self.proxy_manager.get_request_proxy_url(sticky_key=sticky_key)
-                except Exception as e:
-                    debug_logger.log_warning(f"[reCAPTCHA {method}] Failed to get proxy: {e}")
-
+            # proxy_url is pre-resolved by the caller (_get_recaptcha_token) and is the same
+            # proxy set in the request fingerprint, ensuring solve-IP == request-IP.
             # For non-capsolver services: route the API call through the proxy so the
             # captcha service sees the same IP as Flow API requests.
             proxy = None

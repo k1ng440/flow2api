@@ -36,6 +36,7 @@ TEST_TIMEOUT = 20
 TEST_BODY_RE = re.compile(r"<title[^>]*>[^<]*flow[^<]*<", re.IGNORECASE)
 
 FIND_LIMIT = 60
+MAX_PROXIES = 20  # cap on proxies.txt — keep the N with lowest fail_count
 FIND_TYPES = ["HTTP", "HTTPS"]
 FIND_COUNTRIES = ["US", "GB", "DE", "NL"]
 FIND_LEVEL = "High"
@@ -52,6 +53,8 @@ FLOW2API_USERNAME = os.environ.get("FLOW2API_USERNAME", "")
 FLOW2API_PASSWORD = os.environ.get("FLOW2API_PASSWORD", "")
 # Proxies with fail_count >= this are evicted; matches the 24h cooldown tier (fail 4+)
 FAIL_COUNT_EVICT = 4
+# Proxies with error_rate >= this are also evicted regardless of fail_count
+ERROR_RATE_EVICT = 0.8
 
 logging.basicConfig(
     level=logging.INFO,
@@ -134,14 +137,15 @@ async def check_reputation(ip: str, session: aiohttp.ClientSession, sem: asyncio
     return result
 
 
-async def test_proxy(proxy_url: str, session: aiohttp.ClientSession) -> bool:
-    """Return True if proxy reaches TEST_URL with a genuine Google response."""
+async def test_proxy(proxy_url: str, session: aiohttp.ClientSession) -> tuple[bool, float]:
+    """Return (passed, latency_ms). latency_ms is 0 on failure."""
     headers = {
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                       "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.5",
     }
+    t0 = time.monotonic()
     try:
         async with session.get(
             TEST_URL,
@@ -152,16 +156,17 @@ async def test_proxy(proxy_url: str, session: aiohttp.ClientSession) -> bool:
             headers=headers,
             timeout=aiohttp.ClientTimeout(total=TEST_TIMEOUT, connect=10, sock_read=15),
         ) as resp:
+            latency_ms = (time.monotonic() - t0) * 1000
             if resp.status >= 400:
                 log.info(f"FLOW FAIL HTTP {resp.status} {proxy_url}")
-                return False
+                return False, 0.0
             body = await resp.content.read(32768)
             text = body.decode("utf-8", errors="ignore")
             if not TEST_BODY_RE.search(text):
                 log.info(f"FLOW FAIL body-check {proxy_url} (status={resp.status})")
-                return False
-            log.info(f"FLOW PASS {resp.status} {proxy_url}")
-            return True
+                return False, 0.0
+            log.info(f"FLOW PASS {resp.status} {proxy_url} ({latency_ms:.0f}ms)")
+            return True, latency_ms
     except asyncio.TimeoutError:
         log.debug(f"FLOW FAIL timeout {proxy_url}")
     except aiohttp.ClientProxyConnectionError as e:
@@ -170,7 +175,7 @@ async def test_proxy(proxy_url: str, session: aiohttp.ClientSession) -> bool:
         log.debug(f"FLOW FAIL connect {proxy_url}: {e}")
     except Exception as e:
         log.debug(f"FLOW FAIL {proxy_url}: {type(e).__name__}: {e}")
-    return False
+    return False, 0.0
 
 
 async def login_flow2api(session: aiohttp.ClientSession) -> str:
@@ -249,7 +254,8 @@ async def run(limit: int, output: str):
     broker = Broker(found_queue)
     flow_sem = asyncio.Semaphore(CONCURRENT_TESTS)
     repute_sem = asyncio.Semaphore(2)
-    good: list[str] = []
+    good: list[tuple[str, float]] = []  # (url, latency_ms) — newly harvested
+    kept_alive: list[tuple[str, float]] = []  # (url, latency_ms) — existing proxies that re-passed
     tasks: list[asyncio.Task] = []
 
     # Shared sessions: one direct (reputation), one proxied (flow test)
@@ -265,8 +271,18 @@ async def run(limit: int, output: str):
             return
         # Stage 2: actually reach Google Flow through the proxy
         async with flow_sem:
-            if await test_proxy(proxy_url, proxy_session):
-                good.append(proxy_url)
+            passed, latency_ms = await test_proxy(proxy_url, proxy_session)
+            if passed:
+                good.append((proxy_url, latency_ms))
+
+    async def retest_existing(proxy_url: str):
+        """Re-validate an existing pool proxy — skip reputation check, just test connectivity."""
+        async with flow_sem:
+            passed, latency_ms = await test_proxy(proxy_url, proxy_session)
+            if passed:
+                kept_alive.append((proxy_url, latency_ms))
+            else:
+                log.info(f"DEAD (retest failed) {_proxy_display_key(proxy_url)}")
 
     async def drain():
         while True:
@@ -294,20 +310,27 @@ async def run(limit: int, output: str):
     reputation = await fetch_flow2api_reputation(direct_session, flow2api_token)
     existing = read_existing_proxies(output)
 
-    # Keep existing proxies whose flow2api fail_count is below the eviction threshold
+    # Evict existing proxies with too many failures or a high error rate.
+    # Dead proxies (network-unreachable) are caught by re-testing below; this evicts
+    # proxies that connect but consistently fail reCAPTCHA/Flow validation.
     kept: list[str] = []
     evicted: list[str] = []
     for proxy in existing:
         key = _proxy_display_key(proxy)
         rep = reputation.get(key)
-        if rep and rep.get("fail_count", 0) >= FAIL_COUNT_EVICT:
+        fail_count = rep.get("fail_count", 0) if rep else 0
+        error_rate = rep.get("error_rate") if rep else None
+        if fail_count >= FAIL_COUNT_EVICT:
             evicted.append(proxy)
-            log.info(f"EVICT fail_count={rep['fail_count']} {key}")
+            log.info(f"EVICT fail_count={fail_count} {key}")
+        elif error_rate is not None and error_rate >= ERROR_RATE_EVICT:
+            evicted.append(proxy)
+            log.info(f"EVICT error_rate={error_rate:.2f} {key}")
         else:
             kept.append(proxy)
 
     if reputation:
-        log.info(f"Existing proxies: {len(kept)} kept, {len(evicted)} evicted (fail_count >= {FAIL_COUNT_EVICT})")
+        log.info(f"Existing proxies: {len(kept)} kept, {len(evicted)} evicted (fail_count >= {FAIL_COUNT_EVICT} or error_rate >= {ERROR_RATE_EVICT})")
 
     try:
         await asyncio.gather(
@@ -322,6 +345,11 @@ async def run(limit: int, output: str):
         )
         if tasks:
             await asyncio.gather(*tasks)
+        # Re-test existing proxies to flush dead ones (connectivity check, no reputation step)
+        if kept:
+            log.info(f"Re-testing {len(kept)} existing proxies...")
+            await asyncio.gather(*[retest_existing(p) for p in kept])
+            log.info(f"Re-test done: {len(kept_alive)}/{len(kept)} alive")
     finally:
         await direct_session.close()
         await proxy_session.close()
@@ -329,18 +357,44 @@ async def run(limit: int, output: str):
     elapsed = time.monotonic() - t0
     log.info(f"Finished in {elapsed:.1f}s — {len(good)}/{limit} new proxies passed all checks")
 
-    # Combine: kept existing + newly validated, dedup by host:port
+    # Combine re-tested existing (real latency) + newly validated (real latency).
+    # Dedup by host:port, then sort by reputation bucket + latency.
     seen_keys: set = set()
-    final: list[str] = []
-    for proxy in kept + good:
-        key = _proxy_display_key(proxy)
+    candidates: list[tuple[str, float]] = []
+    for proxy_url, latency_ms in kept_alive:
+        key = _proxy_display_key(proxy_url)
         if key not in seen_keys:
             seen_keys.add(key)
-            final.append(proxy)
+            candidates.append((proxy_url, latency_ms))
+    for proxy_url, latency_ms in good:
+        key = _proxy_display_key(proxy_url)
+        if key not in seen_keys:
+            seen_keys.add(key)
+            candidates.append((proxy_url, latency_ms))
+
+    def _sort_key(item: tuple[str, float]) -> tuple:
+        url, latency_ms = item
+        rep = reputation.get(_proxy_display_key(url), {})
+        error_rate = rep.get("error_rate")
+        # Two buckets: proxies with known error_rate sort before unknown (no history).
+        # Within each bucket, lower latency wins.
+        if error_rate is not None:
+            bucket = (0, error_rate)
+        else:
+            bucket = (1, 0.0)
+        return (*bucket, latency_ms)
+
+    candidates.sort(key=_sort_key)
+    final = [url for url, _ in candidates]
 
     if not final:
         log.warning("No proxies after merge — output file unchanged")
         return
+
+    if len(final) > MAX_PROXIES:
+        dropped = len(final) - MAX_PROXIES
+        log.info(f"Capping proxy list to {MAX_PROXIES} (dropped {dropped} worst)")
+        final = final[:MAX_PROXIES]
 
     out_dir = os.path.dirname(os.path.abspath(output))
     with tempfile.NamedTemporaryFile("w", dir=out_dir, delete=False, suffix=".tmp") as f:
@@ -348,7 +402,8 @@ async def run(limit: int, output: str):
         for url in final:
             f.write(url + "\n")
     os.replace(tmp_path, output)
-    log.info(f"Wrote {len(final)} proxies → {output} ({len(kept)} kept, {len(good)} new, {len(evicted)} evicted)")
+    kept_dead = len(kept) - len(kept_alive)
+    log.info(f"Wrote {len(final)} proxies → {output} ({len(kept_alive)} kept, {kept_dead} dead, {len(good)} new, {len(evicted)} evicted, cap={MAX_PROXIES})")
 
 
 def main():

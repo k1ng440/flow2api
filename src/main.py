@@ -47,6 +47,7 @@ async def lifespan(app: FastAPI):
 
     # Sync database config to memory on startup to avoid missing personal/browser runtime config.
     await db.reload_config_to_memory()
+    await proxy_manager.load_stats_from_db()
     generation_handler.file_cache.set_timeout(config.cache_timeout)
     cache_cleanup_enabled = await generation_handler.file_cache.refresh_cleanup_task()
     captcha_config = await db.get_captcha_config()

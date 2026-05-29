@@ -802,6 +802,17 @@ class Database:
                 )
             """)
 
+            # Proxy stats table — lifetime per-proxy counters keyed by scheme://host:port.
+            # Persisted so reputation survives restarts and WARP reconnects.
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS proxy_stats (
+                    proxy_key TEXT PRIMARY KEY,
+                    use_count INTEGER DEFAULT 0,
+                    error_count INTEGER DEFAULT 0,
+                    fail_count INTEGER DEFAULT 0
+                )
+            """)
+
             # Create indexes
             await db.execute("CREATE INDEX IF NOT EXISTS idx_task_id ON tasks(task_id)")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_token_st ON tokens(st)")
@@ -2022,5 +2033,33 @@ class Database:
             await db.execute(
                 "INSERT OR REPLACE INTO upload_cache (image_hash, media_id) VALUES (?, ?)",
                 (image_hash, media_id)
+            )
+            await db.commit()
+
+    async def get_proxy_stats(self) -> List[Dict[str, Any]]:
+        """Load all persisted proxy stats rows."""
+        async with self._connect() as db:
+            cursor = await db.execute(
+                "SELECT proxy_key, use_count, error_count, fail_count FROM proxy_stats"
+            )
+            rows = await cursor.fetchall()
+            return [
+                {"proxy_key": r[0], "use_count": r[1], "error_count": r[2], "fail_count": r[3]}
+                for r in rows
+            ]
+
+    async def upsert_proxy_stats(self, proxy_key: str, use_count: int, error_count: int, fail_count: int):
+        """Persist (or update) lifetime stats for a single proxy key."""
+        async with self._connect(write=True) as db:
+            await db.execute(
+                """
+                INSERT INTO proxy_stats (proxy_key, use_count, error_count, fail_count)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(proxy_key) DO UPDATE SET
+                    use_count = excluded.use_count,
+                    error_count = excluded.error_count,
+                    fail_count = excluded.fail_count
+                """,
+                (proxy_key, use_count, error_count, fail_count)
             )
             await db.commit()

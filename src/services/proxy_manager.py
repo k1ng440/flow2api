@@ -189,7 +189,7 @@ class ProxyManager:
     def flag_proxy(self, proxy_url: str) -> None:
         """Mark a proxy as failed, applying escalating cooldowns on repeated failures."""
         now = time.monotonic()
-        entry = self._proxy_flags.get(proxy_url, {"fail_count": 0})
+        entry = self._proxy_flags.get(proxy_url, {"fail_count": 0, "use_count": 0, "error_count": 0})
         fail = entry["fail_count"] + 1
         cooldown = self._COOLDOWN_SCHEDULE[min(fail - 1, len(self._COOLDOWN_SCHEDULE) - 1)]
         entry["fail_count"] = fail
@@ -200,14 +200,70 @@ class ProxyManager:
         )
 
     def unflag_proxy(self, proxy_url: str) -> None:
-        """Clear flag for a specific proxy."""
-        self._proxy_flags.pop(proxy_url, None)
+        """Clear the cooldown on success; keeps lifetime stats intact."""
+        entry = self._proxy_flags.get(proxy_url, {"fail_count": 0, "use_count": 0, "error_count": 0})
+        entry["fail_count"] = 0
+        entry["cooldown_until"] = 0.0
+        self._proxy_flags[proxy_url] = entry
 
     def unflag_all(self) -> None:
-        """Clear all proxy flags and sticky assignments (WARP reconnect changes egress IP)."""
-        self._proxy_flags.clear()
+        """Clear cooldowns and sticky assignments (WARP reconnect changes egress IP).
+
+        Lifetime use_count/error_count are preserved so reputation data survives reconnects.
+        """
+        for entry in self._proxy_flags.values():
+            entry["fail_count"] = 0
+            entry["cooldown_until"] = 0.0
         self._sticky_assignments.clear()
-        debug_logger.log_info("[ProxyManager] Cleared all proxy flags and sticky assignments")
+        debug_logger.log_info("[ProxyManager] Cleared all proxy cooldowns and sticky assignments")
+
+    def record_request(self, proxy_url: str, ok: bool) -> None:
+        """Record one proxied request outcome for reputation tracking.
+
+        Counts every request (not just connection errors) so error_rate reflects
+        HTTP-level rejections like reCAPTCHA failures, not just connectivity.
+        Fires a background DB write-through to persist stats across restarts.
+        """
+        entry = self._proxy_flags.get(proxy_url, {"fail_count": 0, "use_count": 0, "error_count": 0})
+        entry["use_count"] = entry.get("use_count", 0) + 1
+        if not ok:
+            entry["error_count"] = entry.get("error_count", 0) + 1
+        self._proxy_flags[proxy_url] = entry
+
+        p = urlparse(proxy_url)
+        proxy_key = f"{p.scheme}://{p.hostname}:{p.port}"
+        use_count = entry["use_count"]
+        error_count = entry.get("error_count", 0)
+        fail_count = entry.get("fail_count", 0)
+
+        try:
+            import asyncio as _asyncio
+            loop = _asyncio.get_running_loop()
+            loop.create_task(
+                self.db.upsert_proxy_stats(proxy_key, use_count, error_count, fail_count)
+            )
+        except RuntimeError:
+            pass  # no running loop (tests/scripts); skip DB write
+
+    async def load_stats_from_db(self) -> None:
+        """Seed in-memory proxy flags with persisted lifetime stats on startup."""
+        try:
+            rows = await self.db.get_proxy_stats()
+            for row in rows:
+                proxy_key = row["proxy_key"]
+                # Stats are keyed by display key (no creds); update any matching in-memory entry.
+                # Also seed a bare entry so reputation is available before first request.
+                entry = self._proxy_flags.get(proxy_key, {"fail_count": 0, "cooldown_until": 0.0})
+                entry["use_count"] = row["use_count"]
+                entry["error_count"] = row["error_count"]
+                entry["fail_count"] = row["fail_count"]
+                self._proxy_flags[proxy_key] = entry
+            if rows:
+                debug_logger.log_info(
+                    f"[ProxyManager] Loaded stats for {len(rows)} proxies from DB"
+                )
+        except Exception as e:
+            debug_logger.log_warning(f"[ProxyManager] Failed to load proxy stats from DB: {e}")
 
     def _is_proxy_flagged(self, proxy_url: str) -> bool:
         entry = self._proxy_flags.get(proxy_url)
@@ -319,10 +375,15 @@ class ProxyManager:
             entry = self._proxy_flags.get(proxy, {})
             remaining = max(0.0, entry.get("cooldown_until", 0) - now)
             sticky_count = sum(1 for v in self._sticky_assignments.values() if v == proxy)
+            use_count = entry.get("use_count", 0)
+            error_count = entry.get("error_count", 0)
             p = urlparse(proxy)
             result.append({
                 "proxy": f"{p.scheme}://{p.hostname}:{p.port}",
                 "fail_count": entry.get("fail_count", 0),
+                "use_count": use_count,
+                "error_count": error_count,
+                "error_rate": round(error_count / use_count, 3) if use_count else None,
                 "flagged": remaining > 0,
                 "cooldown_remaining_seconds": round(remaining),
                 "sticky_count": sticky_count,
@@ -336,10 +397,15 @@ class ProxyManager:
                 continue
             remaining = max(0.0, entry.get("cooldown_until", 0) - now)
             if remaining > 0:
+                use_count = entry.get("use_count", 0)
+                error_count = entry.get("error_count", 0)
                 p = urlparse(proxy)
                 result.append({
                     "proxy": f"{p.scheme}://{p.hostname}:{p.port}",
                     "fail_count": entry.get("fail_count", 0),
+                    "use_count": use_count,
+                    "error_count": error_count,
+                    "error_rate": round(error_count / use_count, 3) if use_count else None,
                     "flagged": True,
                     "cooldown_remaining_seconds": round(remaining),
                     "sticky_count": 0,
